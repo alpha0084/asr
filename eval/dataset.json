@@ -1,0 +1,20 @@
+[
+  {
+    "id": "eec34fb4_en",
+    "audio": "https://rhymecall-call-recordings-prod-881490114049-us-east-1-an.s3.us-east-1.amazonaws.com/v5rkju8c.pbx.kcmambitions.com/2026-08-19/eec34fb4-1360-4e42-a2b5-76ac01e86d12.mp3",
+    "language": "en",
+    "note": "English sales call (Vishak / Nexora Capital)"
+  },
+  {
+    "id": "c22fb605_en",
+    "audio": "https://rhymecall-call-recordings-prod-881490114049-us-east-1-an.s3.us-east-1.amazonaws.com/v5rkju8c.pbx.kcmambitions.com/2026-08-17/c22fb605-9108-4722-ad6e-35cb8c2e6f8b.mp3",
+    "language": "en",
+    "note": "Mono 8kHz, quiet customer (Anil Desai / Nexora Capital)"
+  },
+  {
+    "id": "84c6d22c",
+    "audio": "https://rhymecall-call-recordings-prod-881490114049-us-east-1-an.s3.us-east-1.amazonaws.com/v5rkju8c.pbx.kcmambitions.com/2026-08-10/84c6d22c-69ec-4de1-bd19-5c593483cad7.wav",
+    "language": "auto",
+    "note": "add the real language after checking"
+  }
+]

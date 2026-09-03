@@ -1,0 +1,21 @@
+# --- Web backend ---
+fastapi
+uvicorn[standard]
+python-multipart          # file uploads
+
+# --- ASR + diarization ---
+whisperx                  # pulls torch, torchaudio, faster-whisper, pyannote.audio
+# (faster-whisper + pyannote.audio come transitively via whisperx)
+mlx-whisper               # Whisper on the Apple GPU (Metal) — fast ASR backend
+soundfile                 # in-memory WAV loading (libsndfile) — bypasses torchcodec
+
+# --- LLM client (Ollama) ---
+ollama
+
+# --- Optional translation model path ---
+# transformers            # uncomment for NLLB-200 translation mode
+# sentencepiece
+
+# --- Utilities ---
+python-dotenv             # config / HF token from .env
+jiwer                     # WER/CER scoring for the eval harness (eval/)

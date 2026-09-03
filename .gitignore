@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Data & models
+data/
+*.wav
+*.mp3
+*.m4a
+*.db
+
+# Eval harness — keep refs (ground truth), ignore generated output
+eval/out/
+
+# Secrets
+.env

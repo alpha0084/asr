@@ -1,0 +1,227 @@
+"""Admin portal API — auth + runtime configuration.
+
+Mounted under /admin/api. Everything except login/status requires the admin
+session (see admin_auth.require_admin). Dashboard, webhook-log, and task actions
+are added in later phases.
+"""
+import secrets
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from pydantic import BaseModel
+
+from . import admin_auth, db, jobs, public, settings, webhooks
+from .settings import K_MODELS, K_SCORECARD, K_SUMMARY, K_WEBHOOK
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+router = APIRouter(prefix="/admin/api", tags=["Admin"])
+
+_ADMIN = [Depends(admin_auth.require_admin)]
+
+
+class LoginBody(BaseModel):
+    password: str
+
+
+class ModelsBody(BaseModel):
+    whisper_model: str = ""
+    asr_backend: str = ""
+    ollama_model: str = ""
+    target_language: str = ""
+
+
+# ---------------------------------------------------------------- auth
+@router.get("/status", summary="Is admin configured / am I logged in?")
+def status(authorization: str | None = None):
+    return {"configured": admin_auth.is_configured()}
+
+
+@router.post("/login", summary="Admin login → session token + cookie")
+def login(body: LoginBody, response: Response):
+    token = admin_auth.login(body.password)
+    if not token:
+        raise HTTPException(401, "invalid password")
+    # httponly cookie for the browser UI; token also returned for API clients.
+    response.set_cookie("admin_session", token, httponly=True, samesite="lax", max_age=12 * 3600)
+    return {"token": token}
+
+
+@router.post("/logout", dependencies=_ADMIN, summary="Log out (invalidate session)")
+def logout(response: Response, token: str = Depends(admin_auth.require_admin)):
+    admin_auth.logout(token)
+    response.delete_cookie("admin_session")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- config: models/backend
+@router.get("/settings/models", dependencies=_ADMIN, summary="Effective model/backend config")
+def get_models():
+    return settings.models()
+
+
+@router.put("/settings/models", dependencies=_ADMIN, summary="Update model/backend config")
+def put_models(body: ModelsBody):
+    # store only the keys the admin set; blanks fall back to .env defaults via settings.models()
+    db.set_setting(K_MODELS, {k: v.strip() for k, v in body.model_dump().items() if v.strip()})
+    return settings.models()
+
+
+# ---------------------------------------------------------------- config: QA scorecard
+@router.get("/settings/scorecard", dependencies=_ADMIN, summary="QA scorecard (categories/checkpoints/weights)")
+def get_scorecard():
+    return {"scorecard": settings.scorecard(), "default": settings.DEFAULT_SCORECARD}
+
+
+@router.put("/settings/scorecard", dependencies=_ADMIN, summary="Replace the QA scorecard")
+def put_scorecard(scorecard: list = Body(..., embed=True)):
+    _validate_scorecard(scorecard)
+    db.set_setting(K_SCORECARD, scorecard)
+    return {"scorecard": settings.scorecard()}
+
+
+def _validate_scorecard(sc):
+    if not isinstance(sc, list) or not sc:
+        raise HTTPException(400, "scorecard must be a non-empty list of categories")
+    for cat in sc:
+        if not isinstance(cat, dict) or not str(cat.get("category", "")).strip():
+            raise HTTPException(400, "each category needs a non-empty 'category' name")
+        cps = cat.get("checkpoints")
+        if not isinstance(cps, list) or not cps:
+            raise HTTPException(400, f"category '{cat.get('category')}' needs checkpoints")
+        for cp in cps:
+            if not isinstance(cp, dict) or not str(cp.get("name", "")).strip():
+                raise HTTPException(400, "each checkpoint needs a non-empty 'name'")
+
+
+# ---------------------------------------------------------------- config: summary fields
+@router.get("/settings/summary", dependencies=_ADMIN, summary="Summary-stage field config")
+def get_summary():
+    return {"summary": settings.summary_config(), "default": settings.DEFAULT_SUMMARY}
+
+
+@router.put("/settings/summary", dependencies=_ADMIN, summary="Update summary-stage fields")
+def put_summary(summary: dict = Body(..., embed=True)):
+    db.set_setting(K_SUMMARY, summary)
+    return {"summary": settings.summary_config()}
+
+
+# ---------------------------------------------------------------- config: webhook
+@router.get("/settings/webhook", dependencies=_ADMIN, summary="Global webhook config")
+def get_webhook():
+    return settings.webhook()
+
+
+@router.put("/settings/webhook", dependencies=_ADMIN, summary="Update global webhook config")
+def put_webhook(webhook: dict = Body(..., embed=True)):
+    cur = settings.webhook()
+    db.set_setting(K_WEBHOOK, {**cur, **webhook})
+    return settings.webhook()
+
+
+# ---------------------------------------------------------------- X-API-Keys
+class KeyBody(BaseModel):
+    label: str = ""
+
+
+@router.get("/keys", dependencies=_ADMIN, summary="List issued API keys (no secrets)")
+def list_keys():
+    return db.list_api_keys()
+
+
+@router.post("/keys", dependencies=_ADMIN, summary="Create an API key (secret shown once)")
+def create_key(body: KeyBody):
+    raw = "asr_" + secrets.token_urlsafe(24)
+    kid = uuid.uuid4().hex[:12]
+    db.add_api_key(kid, body.label.strip() or "unnamed",
+                   admin_auth.hash_api_key(raw), raw[:12], _now())
+    # The plaintext key is returned exactly once — it is never stored.
+    return {"id": kid, "label": body.label.strip() or "unnamed", "key": raw, "prefix": raw[:12]}
+
+
+@router.delete("/keys/{kid}", dependencies=_ADMIN, summary="Revoke an API key")
+def revoke_key(kid: str):
+    if not db.revoke_api_key(kid, _now()):
+        raise HTTPException(404, "key not found or already revoked")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- dashboard: recordings
+@router.get("/tasks", dependencies=_ADMIN, summary="All recordings + statuses")
+def list_tasks():
+    items = []
+    for j in jobs.list_jobs():
+        item = public.task_list_item(j)
+        item["callback_result"] = j.get("callback_result")
+        item["error"] = j.get("error")
+        items.append(item)
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return items
+
+
+@router.get("/tasks/{tid}", dependencies=_ADMIN, summary="One recording (full result)")
+def get_task(tid: str):
+    job = jobs.get_job(tid)
+    if not job:
+        raise HTTPException(404, "task not found")
+    return public.public_result(job)
+
+
+@router.get("/tasks/{tid}/runs", dependencies=_ADMIN,
+            summary="Version history: every transcribe/summary/analytics run for this recording")
+def task_runs(tid: str):
+    return db.runs_for(tid)
+
+
+@router.get("/runs/{run_id}", dependencies=_ADMIN,
+            summary="One historical run: params + the full result snapshot as it was produced")
+def get_run(run_id: str):
+    run = db.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "run not found")
+    return run
+
+
+@router.post("/tasks/{tid}/rerun", dependencies=_ADMIN,
+             summary="Re-run a stage (stage=summary|analytics|transcribe)")
+def rerun_task(tid: str, stage: str = "analytics"):
+    if not jobs.get_job(tid):
+        raise HTTPException(404, "task not found")
+    stage = stage.lower()
+    if stage == "transcribe":
+        ok = jobs.retranscribe(tid)
+    elif stage in ("summary", "analytics"):
+        ok = jobs.trigger_stage(tid, "summary" if stage == "summary" else "analytics")
+    else:
+        raise HTTPException(400, "stage must be summary, analytics, or transcribe")
+    if not ok:
+        raise HTTPException(409, "task not ready to re-run that stage")
+    return {"ok": True, "stage": stage}
+
+
+@router.delete("/tasks/{tid}", dependencies=_ADMIN, summary="Delete a recording + its files")
+def delete_task(tid: str):
+    if not jobs.delete_job(tid):
+        raise HTTPException(404, "task not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- dashboard: queue + webhooks log
+@router.get("/queue", dependencies=_ADMIN, summary="Queue / worker status")
+def queue():
+    return jobs.queue_status()
+
+
+@router.get("/webhooks", dependencies=_ADMIN, summary="Webhook delivery log")
+def webhook_log(task_id: str | None = None, limit: int = 200):
+    return db.list_webhook_events(limit=limit, task_id=task_id)
+
+
+@router.post("/webhooks/{eid}/redeliver", dependencies=_ADMIN, summary="Re-fire a webhook event")
+def redeliver(eid: str):
+    if not webhooks.redeliver(eid):
+        raise HTTPException(404, "event not found")
+    return {"ok": True}
