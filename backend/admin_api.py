@@ -12,7 +12,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from . import admin_auth, db, jobs, public, settings, webhooks
-from .settings import K_MODELS, K_SCORECARD, K_SUMMARY, K_WEBHOOK
+from .settings import K_MODELS, K_SCORECARD, K_SCORECARD_VERSION, K_SUMMARY, K_WEBHOOK
 
 
 def _now() -> str:
@@ -28,9 +28,12 @@ class LoginBody(BaseModel):
 
 
 class ModelsBody(BaseModel):
-    whisper_model: str = ""
+    transcribe_model: str = ""
     asr_backend: str = ""
-    ollama_model: str = ""
+    speaker_mode: str = ""
+    diarize_model: str = ""
+    summary_model: str = ""
+    analytics_model: str = ""
     target_language: str = ""
 
 
@@ -58,9 +61,48 @@ def logout(response: Response, token: str = Depends(admin_auth.require_admin)):
 
 
 # ---------------------------------------------------------------- config: models/backend
-@router.get("/settings/models", dependencies=_ADMIN, summary="Effective model/backend config")
+_WHISPER_OPTS = [
+    {"id": "large-v3-turbo", "speed": "fastest · great accuracy (recommended)"},
+    {"id": "distil-large-v3.5", "speed": "very fast · good accuracy"},
+    {"id": "medium", "speed": "fast · decent accuracy"},
+    {"id": "small", "speed": "faster · lower accuracy"},
+    {"id": "base", "speed": "very fast · low accuracy"},
+    {"id": "tiny", "speed": "fastest · lowest accuracy"},
+    {"id": "large-v3", "speed": "slowest · best accuracy"},
+]
+_SPEAKER_MODES = [
+    {"id": "llm", "desc": "LLM per-line — best for mono/phone, finest splits"},
+    {"id": "hybrid", "desc": "acoustic clusters + LLM role naming"},
+    {"id": "acoustic", "desc": "pyannote only — generic Speaker 1/2, no roles"},
+]
+
+
+def _ollama_models() -> list:
+    import json
+    import os
+    import urllib.request
+    host = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434").strip()
+    if not host.startswith("http"):
+        host = "http://" + host
+    try:
+        with urllib.request.urlopen(host.rstrip("/") + "/api/tags", timeout=5) as r:
+            data = json.load(r)
+        return sorted(m["name"] for m in data.get("models", []))
+    except Exception:
+        return []
+
+
+@router.get("/settings/models", dependencies=_ADMIN, summary="Per-process model config + options")
 def get_models():
-    return settings.models()
+    return {
+        "current": settings.models(),
+        "available": {
+            "whisper": _WHISPER_OPTS,
+            "backends": ["cuda", "faster", "mlx"],
+            "speaker_modes": _SPEAKER_MODES,
+            "ollama": _ollama_models(),
+        },
+    }
 
 
 @router.put("/settings/models", dependencies=_ADMIN, summary="Update model/backend config")
@@ -79,8 +121,11 @@ def get_scorecard():
 @router.put("/settings/scorecard", dependencies=_ADMIN, summary="Replace the QA scorecard")
 def put_scorecard(scorecard: list = Body(..., embed=True)):
     _validate_scorecard(scorecard)
+    # Preserve ids the editor sent (renames keep their id); mint ids for new items.
+    scorecard, _ = settings._ensure_ids(scorecard)
     db.set_setting(K_SCORECARD, scorecard)
-    return {"scorecard": settings.scorecard()}
+    db.set_setting(K_SCORECARD_VERSION, settings.scorecard_version() + 1)
+    return {"scorecard": settings.scorecard(), "scorecard_version": settings.scorecard_version()}
 
 
 def _validate_scorecard(sc):
