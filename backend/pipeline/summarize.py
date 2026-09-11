@@ -43,7 +43,7 @@ def summarize(turns: list) -> dict:
     if not turns:
         return {}
     prompt = _build_prompt(transcript_text(turns), settings.summary_config())
-    return llm.chat_json(prompt, system=SYSTEM)
+    return llm.chat_json(prompt, system=SYSTEM, model=settings.summary_model())
 
 
 _ROLE_PROMPT = """Here is a call transcript (speaker-labeled):
@@ -60,5 +60,5 @@ def infer_roles(turns: list) -> dict:
     if not turns:
         return {}
     prompt = _ROLE_PROMPT.format(transcript=transcript_text(turns))
-    out = llm.chat_json(prompt, system=SYSTEM)
+    out = llm.chat_json(prompt, system=SYSTEM, model=settings.summary_model())
     return {"agent": out.get("agent"), "customer": out.get("customer")}

@@ -11,7 +11,7 @@ the "merged turns" problem) is the main win. Improving transcription quality
 """
 import re
 
-from .. import llm
+from .. import llm, settings
 from ..config import SPEAKER_PAUSE_GAP
 
 _SENT_END = re.compile(r"[.?!।]$")     # includes Devanagari danda
@@ -90,7 +90,8 @@ def orient(by_speaker: dict) -> dict:
     b_txt = " ".join(by_speaker[b_id])[:1500]
     try:
         out = llm.chat_json(_ORIENT_PROMPT.format(a=a_txt, b=b_txt),
-                            system=_ORIENT_SYSTEM, options=_OPTS)
+                            system=_ORIENT_SYSTEM, options=_OPTS,
+                            model=settings.diarize_model())
         agent = str(out.get("agent", "A")).strip().upper()
     except Exception:
         agent = "A"                      # fallback: the bigger talker is the agent
@@ -153,7 +154,8 @@ def llm_relabel(segments) -> list:
     for start in range(0, len(units), _CHUNK):
         chunk = units[start:start + _CHUNK]
         lines = "\n".join(f"{start + k}: {u['text']}" for k, u in enumerate(chunk))
-        out = llm.chat_json(_PROMPT.format(lines=lines), system=SYSTEM, options=_OPTS)
+        out = llm.chat_json(_PROMPT.format(lines=lines), system=SYSTEM, options=_OPTS,
+                            model=settings.diarize_model())
         got = out.get("labels", {}) if isinstance(out, dict) else {}
         for k in range(len(chunk)):
             i = start + k

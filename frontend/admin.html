@@ -373,18 +373,38 @@ async function saveSummary(){ const body={summary:{
   catch(e){ toast(e.message,true) } }
 
 /* ---------- models ---------- */
-async function viewModels(){ const m=await api("/settings/models");
-  el("view").innerHTML=`<div class="card"><h2>Models & backend</h2>
-    <div class="row"><div><label>Whisper model</label><input id="m_w" value="${esc(m.whisper_model)}"></div>
-    <div><label>ASR backend</label><select id="m_b">
-      ${["mlx","cuda","faster"].map(b=>`<option ${m.asr_backend===b?"selected":""}>${b}</option>`).join("")}</select></div></div>
-    <div class="row" style="margin-top:12px"><div><label>Ollama model</label><input id="m_o" value="${esc(m.ollama_model)}"></div>
-    <div><label>Default target language (blank = none)</label><input id="m_t" value="${esc(m.target_language)}"></div></div>
-    <p class="muted" style="margin-top:8px">On the GPU box use backend <b>cuda</b>. Blank fields fall back to the server's .env defaults.</p>
-    <button style="margin-top:6px" onclick="saveModels()">Save</button></div>`;
+function _opt(val,cur,label){ return `<option value="${esc(val)}" ${val===cur?"selected":""}>${esc(label||val)}</option>`; }
+function _sel(id,cur,opts){ return `<select id="${id}">${opts.map(o=>_opt(o.v,cur,o.l)).join("")}</select>`; }
+function _ollamaSel(id,cur,list){
+  const items=(list||[]).slice(); if(cur && !items.includes(cur)) items.unshift(cur);
+  const opts=items.map(x=>({v:x,l:x}));
+  return _sel(id,cur,opts) + ((list&&list.length)?"":`<div class="muted" style="font-size:11px;margin-top:3px">No models found on the LLM server (${esc(id)}).</div>`);
 }
-async function saveModels(){ const body={whisper_model:el("m_w").value,asr_backend:el("m_b").value,
-    ollama_model:el("m_o").value,target_language:el("m_t").value};
+async function viewModels(){
+  const r=await api("/settings/models"); const m=r.current||{}, av=r.available||{};
+  const whisperOpts=(av.whisper||[]).map(o=>({v:o.id,l:o.id+" — "+o.speed}));
+  if(m.transcribe_model && !whisperOpts.some(o=>o.v===m.transcribe_model)) whisperOpts.unshift({v:m.transcribe_model,l:m.transcribe_model+" (custom)"});
+  const backendOpts=(av.backends||["cuda","faster","mlx"]).map(b=>({v:b,l:b}));
+  const modeOpts=(av.speaker_modes||[]).map(o=>({v:o.id,l:o.id+" — "+o.desc}));
+  el("view").innerHTML=`<div class="card"><h2>Models per process</h2>
+    <p class="muted" style="font-size:12px">Pick the model each stage uses — trade speed vs quality independently. Applies to new runs.</p>
+    <div class="cat"><div class="chead"><b>1 · Transcription (Whisper)</b></div>
+      <div class="row"><div><label>Model</label>${_sel("m_tw",m.transcribe_model,whisperOpts)}</div>
+      <div><label>Backend</label>${_sel("m_be",m.asr_backend,backendOpts)}</div></div></div>
+    <div class="cat"><div class="chead"><b>2 · Diarization</b></div>
+      <div class="row"><div><label>Method</label>${_sel("m_sm",m.speaker_mode,modeOpts)}</div>
+      <div><label>LLM model (used by llm / hybrid)</label>${_ollamaSel("m_dm",m.diarize_model,av.ollama)}</div></div></div>
+    <div class="cat"><div class="chead"><b>3 · Summary</b></div>
+      <div><label>LLM model</label>${_ollamaSel("m_su",m.summary_model,av.ollama)}</div></div>
+    <div class="cat"><div class="chead"><b>4 · QA Analytics</b></div>
+      <div><label>LLM model</label>${_ollamaSel("m_an",m.analytics_model,av.ollama)}</div></div>
+    <div><label>Default translate-to language (blank = none)</label><input id="m_tl" value="${esc(m.target_language)}"></div>
+    <button style="margin-top:12px" onclick="saveModels()">Save</button></div>`;
+}
+async function saveModels(){
+  const body={transcribe_model:el("m_tw").value, asr_backend:el("m_be").value, speaker_mode:el("m_sm").value,
+    diarize_model:el("m_dm").value, summary_model:el("m_su").value, analytics_model:el("m_an").value,
+    target_language:el("m_tl").value};
   try{ await api("/settings/models",{method:"PUT",body:JSON.stringify(body)}); toast("models saved"); }
   catch(e){ toast(e.message,true) } }
 

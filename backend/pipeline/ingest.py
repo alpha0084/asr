@@ -31,15 +31,28 @@ def resolve_input(src: str) -> Path:
 
 
 def _download(url: str, parsed) -> Path:
+    import os
+    import uuid
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     # Name the file from the URL path (strip query string, keep extension).
     name = Path(unquote(parsed.path)).name or "download"
     dest = DOWNLOAD_DIR / name
+    # Already fetched by another job (same recording)? reuse it — dedup.
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    # Download to a per-call temp file, then atomically rename — so concurrent
+    # workers fetching the same URL can't corrupt each other's file.
+    tmp = DOWNLOAD_DIR / f".{uuid.uuid4().hex}.{name}.part"
     print(f"  ↓ downloading {url.split('?')[0]}")
     req = urllib.request.Request(url, headers={"User-Agent": "asr-tool/1.0"})
-    with urllib.request.urlopen(req) as resp, open(dest, "wb") as f:
-        while chunk := resp.read(1 << 20):  # 1 MB chunks
-            f.write(chunk)
+    try:
+        with urllib.request.urlopen(req) as resp, open(tmp, "wb") as f:
+            while chunk := resp.read(1 << 20):  # 1 MB chunks
+                f.write(chunk)
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
     size_mb = dest.stat().st_size / 1e6
     print(f"  ✓ saved {dest.name} ({size_mb:.1f} MB)")
     return dest

@@ -1,8 +1,11 @@
-"""In-process background job runner with SQLite persistence.
+"""Durable, concurrent job runner backed by Postgres.
 
-A single worker thread serializes the heavy model work (one call at a time). Job
-state is mirrored to SQLite so task history + results survive server restarts.
-Transcribe runs first; summary and QA analytics are triggered on demand per task.
+Recordings are enqueued to Postgres (status='queued'); a pool of worker threads
+claims them with `SELECT … FOR UPDATE SKIP LOCKED` and runs the pipeline. Because
+the queue lives in the DB, queued work survives restarts, and extra worker
+machines can pull from the same `DATABASE_URL` — scale out by adding workers/GPUs
+with no code change. Live progress (stage/detail) is kept in memory and merged
+into status reads; the durable state (queued/running/done + result) is in Postgres.
 """
 import json
 import os
@@ -11,261 +14,119 @@ import threading
 import urllib.error
 import urllib.request
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import db, public, webhooks
-from .config import DATA_DIR
+from .config import DATA_DIR, WORKER_CONCURRENCY
 from .pipeline import runner
 
-_executor = ThreadPoolExecutor(max_workers=1)   # serialize heavy work
-_jobs: dict = {}
-_lock = threading.Lock()
+_live: dict = {}                 # {jid: {"stage":..., "detail":...}} transient progress
+_live_lock = threading.Lock()
+_wake = threading.Event()        # nudges idle workers when new work is enqueued
+_started = False
+_start_lock = threading.Lock()
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _persist(jid):
-    """Mirror the in-memory job to SQLite (called on state transitions)."""
-    with _lock:
-        job = dict(_jobs.get(jid) or {})
-    if job:
-        job["updated_at"] = _now()
-        db.save(job)
+def _set_live(jid, **kw):
+    with _live_lock:
+        _live.setdefault(jid, {}).update(kw)
+
+
+def _clear_live(jid):
+    with _live_lock:
+        _live.pop(jid, None)
 
 
 def _record_run(jid, run_type, params, result):
-    """Store an immutable versioned run (never blocks the job on a DB error)."""
     try:
         db.record_run(jid, run_type, params, result)
     except Exception as e:
         print(f"[db] record_run({run_type}) failed for {jid}: {e}", flush=True)
 
 
-def load_from_db():
-    """On startup: repopulate tasks from the DB; mark unfinished ones interrupted."""
-    db.init_db()
-    for job in db.load_all():
-        if job.get("status") in ("queued", "running"):
-            job["status"] = "interrupted"
-            job["error"] = job.get("error") or "server restarted while processing"
-        job.setdefault("detail", None)
-        _jobs[job["id"]] = job
-    # persist the interrupted transitions
-    for jid, job in list(_jobs.items()):
-        if job.get("status") == "interrupted":
-            _persist(jid)
-
-
+# ---------------------------------------------------------------- public API
 def create_job(src, filename, model=None, language=None, speakers=None, target_language=None,
                include_summary=False, include_analytics=False, callback_url=None) -> str:
+    """Enqueue a recording. Returns immediately with a job id; workers process it."""
     jid = uuid.uuid4().hex[:12]
-    with _lock:
-        _jobs[jid] = {
-            "id": jid, "filename": filename, "source": src, "status": "queued",
-            "stage": None, "detail": None, "stages": runner.STAGES,
-            "result": None, "error": None,
-            "summary_status": None, "analytics_status": None,
-            "created_at": _now(),
-        }
-    _persist(jid)
-    _executor.submit(_run, jid, src, model, language, speakers, target_language,
-                     include_summary, include_analytics, callback_url)
+    final_stage = ("analytics" if include_analytics else
+                   "summary" if include_summary else "transcribe")
+    params = {
+        "model": model, "language": language, "speakers": speakers,
+        "target_language": target_language, "callback_url": callback_url,
+        "include_summary": include_summary, "include_analytics": include_analytics,
+        "final_stage": final_stage,
+    }
+    db.enqueue_recording(jid, filename, src, params)
+    start()
+    _wake.set()
     return jid
 
 
-def _run(jid, src, model, language, speakers, target_language,
-         include_summary, include_analytics, callback_url=None):
-    def on_stage(name):
-        with _lock:
-            _jobs[jid]["status"] = "running"
-            _jobs[jid]["stage"] = name
-            _jobs[jid]["detail"] = None
-        _persist(jid)
-
-    def on_progress(detail):
-        with _lock:
-            _jobs[jid]["detail"] = detail
-
-    try:
-        result = runner.transcribe_only(
-            src, model=model, language=language, speakers=speakers,
-            target_language=target_language, on_stage=on_stage, on_progress=on_progress)
-        with _lock:
-            _jobs[jid]["result"] = result
-        _persist(jid)
-        _record_run(jid, "transcribe", result.get("params"), result)
-        webhooks.emit(get_job(jid), "transcribed")
-    except Exception as e:
-        with _lock:
-            _jobs[jid].update(status="error", error=f"{type(e).__name__}: {e}")
-        _persist(jid)
-        if callback_url:
-            _deliver(jid, callback_url)
-        return
-
-    if include_summary:
-        with _lock:
-            _jobs[jid]["stage"] = "Summarizing"
-        _do_summary(jid)
-    if include_analytics:
-        with _lock:
-            _jobs[jid]["stage"] = "Analyzing"
-        _do_analytics(jid)
-
-    with _lock:
-        _jobs[jid].update(status="done", stage="Done")
-    _persist(jid)
-    if callback_url:
-        _deliver(jid, callback_url)
-
-
-# ---- on-demand stages (Summarize / Analyze) ----
 def trigger_stage(jid, name) -> bool:
-    with _lock:
-        job = _jobs.get(jid)
-        if not job or job.get("status") != "done" or not job.get("result"):
-            return False
-        key = "summary_status" if name == "summary" else "analytics_status"
-        if job.get(key) == "running":
-            return True
-        job[key] = "queued"
-    _persist(jid)
-    _executor.submit(_do_summary if name == "summary" else _do_analytics, jid)
+    """Queue an on-demand stage (summary|analytics) on a finished recording."""
+    job = db.load_one(jid)
+    if not job or job.get("status") != "done" or not job.get("result"):
+        return False
+    col = "summary_status" if name == "summary" else "analytics_status"
+    if job.get(col) == "running":
+        return True
+    db.set_recording(jid, **{col: "queued"})
+    start()
+    _wake.set()
     return True
-
-
-def _do_summary(jid):
-    with _lock:
-        _jobs[jid]["summary_status"] = "running"
-    _persist(jid)
-    try:
-        with _lock:
-            result = _jobs[jid]["result"]
-        runner.add_summary(result)
-        with _lock:
-            _jobs[jid]["summary_status"] = "done"
-            _jobs[jid]["result"] = result
-        _persist(jid)
-        _record_run(jid, "summary", result.get("summary_params"), result)
-        webhooks.emit(get_job(jid), "summarized")
-        return
-    except Exception as e:
-        with _lock:
-            _jobs[jid]["summary_status"] = f"error: {e}"
-    _persist(jid)
-
-
-def _do_analytics(jid):
-    with _lock:
-        _jobs[jid]["analytics_status"] = "running"
-    _persist(jid)
-    def on_progress(detail):
-        with _lock:
-            _jobs[jid]["detail"] = detail
-    try:
-        with _lock:
-            result = _jobs[jid]["result"]
-        runner.add_analytics(result, on_progress=on_progress)
-        with _lock:
-            _jobs[jid]["analytics_status"] = "done"
-            _jobs[jid]["detail"] = None
-            _jobs[jid]["result"] = result
-        _persist(jid)
-        _record_run(jid, "analytics", result.get("analytics_params"), result)
-        webhooks.emit(get_job(jid), "analyzed")
-        return
-    except Exception as e:
-        with _lock:
-            _jobs[jid]["analytics_status"] = f"error: {e}"
-    _persist(jid)
-
-
-def _deliver(jid, callback_url):
-    status = _post_callback(callback_url, public.public_result(get_job(jid)))
-    with _lock:
-        _jobs[jid]["callback_result"] = status
-
-
-def _post_callback(url, payload, retries=2) -> str:
-    data = json.dumps(payload).encode("utf-8")
-    last = "not attempted"
-    for attempt in range(retries + 1):
-        try:
-            req = urllib.request.Request(
-                url, data=data, method="POST",
-                headers={"Content-Type": "application/json", "User-Agent": "asr-tool/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                print(f"[callback] POST {url} -> {resp.status}", flush=True)
-                return f"delivered ({resp.status})"
-        except urllib.error.HTTPError as e:
-            last = f"HTTP {e.code} from your server"
-            print(f"[callback] attempt {attempt+1}: {last}", flush=True)
-        except Exception as e:
-            last = f"{type(e).__name__}: {e}"
-            print(f"[callback] attempt {attempt+1} failed: {last}", flush=True)
-    return f"failed — {last}"
 
 
 def get_job(jid) -> dict:
-    with _lock:
-        return dict(_jobs.get(jid) or {})
+    job = db.load_one(jid) or {}
+    if job:
+        with _live_lock:
+            live = _live.get(jid)
+        if live:
+            job = {**job, **{k: v for k, v in live.items() if v is not None}}
+        job.setdefault("stages", runner.STAGES)
+    return job
 
 
 def list_jobs() -> list:
-    with _lock:
-        return [{k: v for k, v in j.items() if k != "result"} for j in _jobs.values()]
+    rows = db.list_recordings()
+    with _live_lock:
+        live = dict(_live)
+    for r in rows:
+        if r["id"] in live:
+            r.update({k: v for k, v in live[r["id"]].items() if v is not None})
+    return rows
 
 
-# ---- dashboard: queue monitor + task actions ----
 def queue_status() -> dict:
-    """Snapshot of the single heavy-work queue + any on-demand stages in flight."""
-    with _lock:
-        snap = list(_jobs.values())
-    queued = [j["id"] for j in snap if j.get("status") == "queued"]
-    running = [{"id": j["id"], "stage": j.get("stage"), "detail": j.get("detail")}
-               for j in snap if j.get("status") == "running"]
-    active_stages = [
-        {"id": j["id"], "summary_status": j.get("summary_status"),
-         "analytics_status": j.get("analytics_status")}
-        for j in snap
-        if j.get("summary_status") in ("queued", "running")
-        or j.get("analytics_status") in ("queued", "running")]
-    return {"workers": 1, "counts": {"queued": len(queued), "running": len(running)},
-            "queued": queued, "running": running, "active_stages": active_stages}
+    c = db.queue_counts()
+    with _live_lock:
+        running = [{"id": jid, "stage": v.get("stage"), "detail": v.get("detail")}
+                   for jid, v in _live.items()]
+    return {"workers": WORKER_CONCURRENCY,
+            "counts": {"queued": c["queued"], "running": c["running"]},
+            "queued": [], "running": running, "active_stages": c["active_stages"]}
 
 
 def retranscribe(jid: str) -> bool:
-    """Re-run the transcribe pass in place on the stored source (defaults for options)."""
-    job = get_job(jid)
+    job = db.load_one(jid)
     if not job or not job.get("source"):
         return False
-    with _lock:
-        _jobs[jid].update(status="queued", stage=None, detail=None, error=None,
-                          result=None, summary_status=None, analytics_status=None)
-    _persist(jid)
-    _executor.submit(_run, jid, job["source"], None, None, None, None, False, False, None)
+    db.set_recording(jid, status="queued", stage=None, error=None, result=None,
+                     summary_status=None, analytics_status=None)
+    start()
+    _wake.set()
     return True
 
 
-def _within(path: str) -> bool:
-    """True if `path` lives under DATA_DIR — a guard before deleting anything."""
-    try:
-        Path(path).resolve().relative_to(DATA_DIR.resolve())
-        return True
-    except (ValueError, TypeError):
-        return False
-
-
 def delete_job(jid: str) -> bool:
-    with _lock:
-        job = _jobs.pop(jid, None)
+    job = db.load_one(jid)
     result = (job or {}).get("result") or {}
-    # remove the per-call work dir (audio16k.wav + transcript.json) and any local source
     out_json = result.get("out_json")
     if out_json and _within(out_json):
         shutil.rmtree(Path(out_json).parent, ignore_errors=True)
@@ -276,4 +137,156 @@ def delete_job(jid: str) -> bool:
         except OSError:
             pass
     db.delete_task(jid)
+    _clear_live(jid)
     return job is not None
+
+
+def _within(path: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(DATA_DIR.resolve())
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------- worker pool
+def load_from_db():
+    """Startup: ensure schema, put interrupted work back on the queue, start workers."""
+    db.init_db()
+    db.requeue_running()
+    start()
+
+
+def start():
+    """Idempotently launch the worker pool."""
+    global _started
+    with _start_lock:
+        if _started:
+            return
+        _started = True
+    for i in range(max(1, WORKER_CONCURRENCY)):
+        threading.Thread(target=_worker_loop, name=f"asr-worker-{i}", daemon=True).start()
+    print(f"[jobs] worker pool started: {WORKER_CONCURRENCY} workers", flush=True)
+
+
+def _worker_loop():
+    while True:
+        try:
+            did = _process_one()
+        except Exception as e:
+            print(f"[worker] error: {e}", flush=True)
+            did = False
+        if not did:
+            _wake.wait(timeout=2.0)
+            _wake.clear()
+
+
+def _process_one() -> bool:
+    claim = db.claim_transcribe()
+    if claim:
+        _run_transcribe(claim)
+        return True
+    claim = db.claim_stage("summary")
+    if claim:
+        _run_stage(claim, "summary")
+        return True
+    claim = db.claim_stage("analytics")
+    if claim:
+        _run_stage(claim, "analytics")
+        return True
+    return False
+
+
+def _run_transcribe(claim):
+    jid = claim["id"]
+    src = claim["source"]
+    p = claim.get("request_params") or {}
+
+    def on_stage(name):
+        _set_live(jid, stage=name, detail=None)
+        db.set_recording(jid, stage=name)
+
+    def on_progress(detail):
+        _set_live(jid, detail=detail)
+
+    try:
+        result = runner.transcribe_only(
+            src, model=p.get("model"), language=p.get("language"),
+            speakers=p.get("speakers"), target_language=p.get("target_language"),
+            on_stage=on_stage, on_progress=on_progress, work_id=jid)
+    except Exception as e:
+        db.set_recording(jid, status="error", error=f"{type(e).__name__}: {e}")
+        _clear_live(jid)
+        _deliver(jid, p.get("callback_url"))
+        return
+
+    db.set_recording(jid, status="done", stage="Done", result=result)
+    _clear_live(jid)
+    _record_run(jid, "transcribe", result.get("params"), result)
+    webhooks.emit(get_job(jid), "transcribed")
+
+    # All-in-one path: chain the requested on-demand stages onto the queue.
+    if p.get("include_summary"):
+        db.set_recording(jid, summary_status="queued")
+        _wake.set()
+    elif p.get("include_analytics"):
+        db.set_recording(jid, analytics_status="queued")
+        _wake.set()
+    if p.get("final_stage") == "transcribe":
+        _deliver(jid, p.get("callback_url"))
+
+
+def _run_stage(claim, stage):
+    jid = claim["id"]
+    result = claim.get("result_json") or {}
+    p = claim.get("request_params") or {}
+    _set_live(jid, stage=("Summarizing" if stage == "summary" else "Analyzing"))
+    try:
+        if stage == "summary":
+            runner.add_summary(result)
+            params, event = result.get("summary_params"), "summarized"
+        else:
+            runner.add_analytics(result, on_progress=lambda d: _set_live(jid, detail=d))
+            params, event = result.get("analytics_params"), "analyzed"
+        db.set_recording(jid, result=result, **{f"{stage}_status": "done"})
+        _clear_live(jid)
+        _record_run(jid, stage, params, result)
+        webhooks.emit(get_job(jid), event)
+    except Exception as e:
+        db.set_recording(jid, **{f"{stage}_status": f"error: {e}"})
+        _clear_live(jid)
+        return
+
+    # Chain analytics after summary for the all-in-one path; fire callback on the last stage.
+    if stage == "summary" and p.get("include_analytics"):
+        db.set_recording(jid, analytics_status="queued")
+        _wake.set()
+    if p.get("final_stage") == stage:
+        _deliver(jid, p.get("callback_url"))
+
+
+# ---------------------------------------------------------------- per-request callback
+def _deliver(jid, callback_url):
+    if not callback_url:
+        return
+    _post_callback(callback_url, public.public_result(get_job(jid)))
+
+
+def _post_callback(url, payload, retries=2) -> str:
+    data = json.dumps(payload).encode("utf-8")
+    last = "not attempted"
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(
+                url, data=data, method="POST",
+                headers={"Content-Type": "application/json", "User-Agent": "asr-tool/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                print(f"[callback] POST {url} -> {resp.status}", flush=True)
+                return f"delivered ({resp.status})"
+        except urllib.error.HTTPError as e:
+            last = f"HTTP {e.code} from your server"
+            print(f"[callback] attempt {attempt+1}: {last}", flush=True)
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+            print(f"[callback] attempt {attempt+1} failed: {last}", flush=True)
+    return f"failed — {last}"

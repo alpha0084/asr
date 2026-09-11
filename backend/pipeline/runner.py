@@ -14,7 +14,7 @@ import os
 
 from .. import settings
 from ..config import (AUDIO_CLEANUP, AUDIO_CLEANUP_FILTERS, DATA_DIR,
-                      SPEAKER_MODE, SPEAKER_PAUSE_GAP)
+                      SPEAKER_PAUSE_GAP)
 from ..utils import fmt_ts, speaker_label
 from . import (analyze, assemble, diarize, ingest, preprocess, refine_speakers,
                summarize, transcribe, translate)
@@ -26,12 +26,16 @@ STAGES = ["Ingesting", "Preprocessing", "Transcribing", "Diarizing", "Assembling
 
 
 def transcribe_only(src, model=None, language=None, speakers=None,
-                    target_language=None, on_stage=None, on_progress=None) -> dict:
+                    target_language=None, on_stage=None, on_progress=None,
+                    work_id=None) -> dict:
     """Ingest → preprocess → transcribe → diarize → assemble → translate.
 
     Returns speaker-wise turns + full text (+ translation). No summary/analytics.
+    `work_id` (the job id) isolates each run's scratch dir so concurrent workers
+    never collide, even on the same recording.
     """
     model = model or settings.whisper_model()
+    spk_mode = settings.speaker_mode()
     target_language = (target_language or settings.default_target_language() or "").strip() or None
 
     def stage(name):
@@ -49,7 +53,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
 
     stage("Preprocessing")
     meta = preprocess.probe(audio_path)
-    work_dir = DATA_DIR / audio_path.stem
+    work_dir = DATA_DIR / (work_id or audio_path.stem)
     wav = preprocess.to_wav(audio_path, work_dir / "audio16k.wav",
                             clean=AUDIO_CLEANUP, filters=AUDIO_CLEANUP_FILTERS)
     waveform, sr = preprocess.load_waveform(wav)
@@ -68,7 +72,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
     # Mode "llm": split the transcript into sentences and label each agent/customer
     # with the LLM. Finest splits (no acoustic dependency) but per-line labels can
     # wobble on garbled audio.
-    if SPEAKER_MODE == "llm":
+    if spk_mode == "llm":
         try:
             relabelled = refine_speakers.llm_relabel(tr["segments"])
             if relabelled:
@@ -99,7 +103,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
         label_map: dict = {}
         name_of = lambda raw: speaker_label(raw, label_map)   # default: Speaker 1/2/…
 
-        if SPEAKER_MODE == "hybrid":
+        if spk_mode == "hybrid":
             by_speaker: dict = {}
             for t in raw_turns:
                 by_speaker.setdefault(t["speaker"], []).append(t["text"])
@@ -155,7 +159,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
         "params": {
             "whisper_model": model,
             "asr_backend": settings.asr_backend(),
-            "speaker_mode": SPEAKER_MODE,
+            "speaker_mode": spk_mode,
             "speaker_pause_gap": SPEAKER_PAUSE_GAP,
             "audio_cleanup": AUDIO_CLEANUP,
             "audio_cleanup_filters": AUDIO_CLEANUP_FILTERS if AUDIO_CLEANUP else None,
@@ -177,7 +181,7 @@ def add_summary(result: dict, on_stage=None) -> dict:
         summary = {"error": f"{type(e).__name__}: {e}"}
     result["summary"] = summary
     result["summary_params"] = {
-        "ollama_model": settings.ollama_model(),
+        "ollama_model": settings.summary_model(),
         "ollama_host": os.environ.get("OLLAMA_HOST", ""),
     }
     if summary.get("roles"):
@@ -207,7 +211,7 @@ def add_analytics(result: dict, on_stage=None, on_progress=None) -> dict:
         qa = {"error": f"{type(e).__name__}: {e}"}
     result["analytics"] = qa
     result["analytics_params"] = {
-        "ollama_model": settings.ollama_model(),
+        "ollama_model": settings.analytics_model(),
         "ollama_host": os.environ.get("OLLAMA_HOST", ""),
         "scorecard_categories": len(settings.scorecard() or []),
     }

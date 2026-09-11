@@ -134,7 +134,8 @@ def create_task(req: schemas.TranscribeRequest):
     Summary and QA analytics are **not** run here — call `/summarize` and
     `/analyze` afterward. Returns a `task_id` used for every follow-up call.
     """
-    model = "large-v3" if req.engine.strip().lower() in ("auto", "") else req.engine.strip()
+    # "auto" → use the admin-selected default model (settings.whisper_model()).
+    model = None if req.engine.strip().lower() in ("auto", "") else req.engine.strip()
     language = None if req.language.strip().lower() in ("auto", "") else req.language.strip()
     target = "English" if req.translate_to_english else None
     name = req.audio_path.split("?")[0].rsplit("/", 1)[-1] or "audio"
@@ -309,7 +310,8 @@ def job_audio(jid: str):
 def create_v1_job(req: schemas.TranscribeRequest):
     """Deprecated. Runs everything in a single job (webhook or poll). New
     integrations should use the **Tasks API** instead."""
-    model = "large-v3" if req.engine.strip().lower() in ("auto", "") else req.engine.strip()
+    # "auto" → use the admin-selected default model (settings.whisper_model()).
+    model = None if req.engine.strip().lower() in ("auto", "") else req.engine.strip()
     language = None if req.language.strip().lower() in ("auto", "") else req.language.strip()
     target = "English" if req.translate_to_english else None
     name = req.audio_path.split("?")[0].rsplit("/", 1)[-1] or "audio"

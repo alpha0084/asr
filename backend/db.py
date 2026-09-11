@@ -50,7 +50,12 @@ _DDL = [
     """CREATE TABLE IF NOT EXISTS recordings (
         id TEXT PRIMARY KEY, filename TEXT, source TEXT, status TEXT, stage TEXT,
         summary_status TEXT, analytics_status TEXT, error TEXT,
-        created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, result_json JSONB)""",
+        created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, result_json JSONB,
+        request_params JSONB)""",
+    "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS request_params JSONB",
+    "CREATE INDEX IF NOT EXISTS idx_rec_status ON recordings(status, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_rec_sumq ON recordings(summary_status)",
+    "CREATE INDEX IF NOT EXISTS idx_rec_anaq ON recordings(analytics_status)",
     """CREATE TABLE IF NOT EXISTS runs (
         run_id UUID PRIMARY KEY,
         recording_id TEXT REFERENCES recordings(id) ON DELETE CASCADE,
@@ -90,6 +95,13 @@ _DDL = [
         id TEXT PRIMARY KEY, task_id TEXT, event_type TEXT, target_url TEXT, status TEXT,
         attempts INT DEFAULT 0, last_error TEXT, payload_json JSONB,
         created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ)""",
+    # Stable keys + normalized verdict flags for rollups (survive checkpoint renames).
+    "ALTER TABLE scorecard_items ADD COLUMN IF NOT EXISTS category_id TEXT",
+    "ALTER TABLE scorecard_items ADD COLUMN IF NOT EXISTS checkpoint_id TEXT",
+    "ALTER TABLE scorecard_items ADD COLUMN IF NOT EXISTS met INT",
+    "ALTER TABLE scorecard_items ADD COLUMN IF NOT EXISTS applicable BOOLEAN",
+    "ALTER TABLE analytics ADD COLUMN IF NOT EXISTS scorecard_version INT",
+    "CREATE INDEX IF NOT EXISTS idx_sci_cpid ON scorecard_items(checkpoint_id)",
 ]
 
 
@@ -104,7 +116,7 @@ def save(job: dict):
     """Upsert a recording row from an in-memory job dict (latest result as JSONB)."""
     row = {k: job.get(k) for k in _FIELDS}
     result = job.get("result")
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("""
             INSERT INTO recordings (id, filename, source, status, stage, summary_status,
                                     analytics_status, error, created_at, updated_at, result_json)
@@ -135,9 +147,93 @@ def load_all() -> list:
 
 
 def delete_task(tid: str):
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("DELETE FROM recordings WHERE id=%s", (tid,))   # cascades runs/turns/...
         cur.execute("DELETE FROM webhook_events WHERE task_id=%s", (tid,))
+
+
+# ---------------------------------------------------------------- durable queue
+def enqueue_recording(jid: str, filename: str, source: str, request_params: dict):
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO recordings (id, filename, source, status, request_params, "
+            "created_at, updated_at) VALUES (%s,%s,%s,'queued',%s,%s,%s)",
+            (jid, filename, source, Json(request_params or {}), _now(), _now()))
+
+
+def load_one(tid: str) -> dict | None:
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT * FROM recordings WHERE id=%s", (tid,))
+        r = cur.fetchone()
+    return _row_to_job(r) if r else None
+
+
+def list_recordings() -> list:
+    """Metadata only (no heavy result_json), newest first — for the dashboard list."""
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT id, filename, source, status, stage, summary_status, "
+                    "analytics_status, error, created_at, updated_at FROM recordings "
+                    "ORDER BY created_at DESC")
+        rows = cur.fetchall()
+    for r in rows:
+        for tk in ("created_at", "updated_at"):
+            if r.get(tk) is not None:
+                r[tk] = r[tk].isoformat()
+    return rows
+
+
+def claim_transcribe() -> dict | None:
+    """Atomically claim the next queued recording for a worker (concurrency-safe)."""
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            UPDATE recordings SET status='running', stage='Ingesting', updated_at=%s
+            WHERE id = (SELECT id FROM recordings WHERE status='queued'
+                        ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
+            RETURNING id, source, request_params
+        """, (_now(),))
+        return cur.fetchone()
+
+
+def claim_stage(stage: str) -> dict | None:
+    """Atomically claim a queued on-demand stage (summary|analytics) on a done recording."""
+    col = "summary_status" if stage == "summary" else "analytics_status"
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute(f"""
+            UPDATE recordings SET {col}='running', updated_at=%s
+            WHERE id = (SELECT id FROM recordings WHERE {col}='queued' AND status='done'
+                        ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
+            RETURNING id, result_json, request_params
+        """, (_now(),))
+        return cur.fetchone()
+
+
+def set_recording(tid: str, **fields):
+    """Patch a recording's columns (pass result=<dict> to store the result blob)."""
+    if "result" in fields:
+        fields["result_json"] = Json(fields.pop("result"))
+    fields["updated_at"] = _now()
+    cols = ", ".join(f"{k}=%s" for k in fields)
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(f"UPDATE recordings SET {cols} WHERE id=%s", (*fields.values(), tid))
+
+
+def queue_counts() -> dict:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT status, count(*) FROM recordings GROUP BY status")
+        by = {row[0]: row[1] for row in cur.fetchall()}
+        cur.execute("SELECT count(*) FROM recordings WHERE summary_status IN ('queued','running') "
+                    "OR analytics_status IN ('queued','running')")
+        stages = cur.fetchone()[0]
+    return {"queued": by.get("queued", 0), "running": by.get("running", 0),
+            "done": by.get("done", 0), "error": by.get("error", 0), "active_stages": stages}
+
+
+def requeue_running():
+    """Startup recovery: work that was mid-flight didn't finish → back on the queue."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE recordings SET status='queued', stage=NULL WHERE status='running'")
+        cur.execute("UPDATE recordings SET summary_status='queued' WHERE summary_status='running'")
+        cur.execute("UPDATE recordings SET analytics_status='queued' WHERE analytics_status='running'")
 
 
 # ---------------------------------------------------------------- versioned runs (audit trail)
@@ -148,7 +244,7 @@ def record_run(recording_id: str, run_type: str, params: dict | None, result: di
     """
     run_id = uuid.uuid4()
     proc = (result or {}).get("elapsed_seconds") or (result or {}).get("processing_seconds")
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute(
             "INSERT INTO runs (run_id, recording_id, run_type, status, params, result, "
             "processing_seconds, created_at) VALUES (%s,%s,%s,'done',%s,%s,%s,%s)",
@@ -192,15 +288,17 @@ def _insert_summary(cur, run_id, rec, result):
 def _insert_analytics(cur, run_id, rec, result):
     a = result.get("analytics") or {}
     cur.execute(
-        "INSERT INTO analytics (run_id, recording_id, overall_score, compliance_fail) "
-        "VALUES (%s,%s,%s,%s)",
-        (run_id, rec, a.get("overall_score"), a.get("compliance_fail")))
+        "INSERT INTO analytics (run_id, recording_id, overall_score, compliance_fail, "
+        "scorecard_version) VALUES (%s,%s,%s,%s,%s)",
+        (run_id, rec, a.get("overall_score"), a.get("compliance_fail"), a.get("scorecard_version")))
     for it in a.get("scorecard") or []:
         cur.execute(
-            "INSERT INTO scorecard_items (run_id, recording_id, category, checkpoint, score, "
-            "verdict, evidence, suggestion) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (run_id, rec, it.get("category"), it.get("checkpoint"), it.get("score"),
-             it.get("verdict"), it.get("evidence"), it.get("suggestion")))
+            "INSERT INTO scorecard_items (run_id, recording_id, category, category_id, "
+            "checkpoint, checkpoint_id, score, verdict, met, applicable, evidence, suggestion) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (run_id, rec, it.get("category"), it.get("category_id"), it.get("checkpoint"),
+             it.get("checkpoint_id"), it.get("score"), it.get("verdict"), it.get("met"),
+             it.get("applicable"), it.get("evidence"), it.get("suggestion")))
 
 
 def runs_for(recording_id: str) -> list:
@@ -247,14 +345,14 @@ def get_setting(key: str, default=None):
 
 
 def set_setting(key: str, value):
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("INSERT INTO settings(key, value) VALUES(%s, %s) "
                     "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", (key, Json(value)))
 
 
 # ---------------------------------------------------------------- api keys
 def add_api_key(kid: str, label: str, key_hash: str, prefix: str, created_at: str):
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("INSERT INTO api_keys(id, label, key_hash, prefix, created_at, revoked_at) "
                     "VALUES(%s,%s,%s,%s,%s,NULL)", (kid, label, key_hash, prefix, created_at))
 
@@ -278,7 +376,7 @@ def active_key_hashes() -> set:
 
 
 def revoke_api_key(kid: str, when: str) -> bool:
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("UPDATE api_keys SET revoked_at=%s WHERE id=%s AND revoked_at IS NULL",
                     (when, kid))
         return cur.rowcount > 0
@@ -286,7 +384,7 @@ def revoke_api_key(kid: str, when: str) -> bool:
 
 # ---------------------------------------------------------------- webhook events
 def add_webhook_event(eid, task_id, event_type, target_url, payload, now):
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute("INSERT INTO webhook_events(id, task_id, event_type, target_url, status, "
                     "attempts, last_error, payload_json, created_at, updated_at) "
                     "VALUES(%s,%s,%s,%s,'pending',0,NULL,%s,%s,%s)",
@@ -297,7 +395,7 @@ def update_webhook_event(eid, **fields):
     if not fields:
         return
     cols = ", ".join(f"{k}=%s" for k in fields)
-    with _lock, _conn() as c, c.cursor() as cur:
+    with _conn() as c, c.cursor() as cur:
         cur.execute(f"UPDATE webhook_events SET {cols} WHERE id=%s", (*fields.values(), eid))
 
 

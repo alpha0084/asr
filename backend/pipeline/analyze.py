@@ -3,8 +3,23 @@
 The scorecard (categories, checkpoints, weights) is admin-configurable — see
 `settings.scorecard()`; the default lives in `settings.DEFAULT_SCORECARD`.
 """
+import re
+
 from .. import llm, settings
 from ..utils import transcript_text
+
+# Constrain the model's free-text verdict to a fixed enum so downstream $inc
+# counters (met-rate, N/A-rate, …) are unambiguous.
+_VERDICT_MAP = {
+    "met": "Met", "partiallymet": "Partially Met", "partial": "Partially Met",
+    "notmet": "Not Met", "fail": "Not Met", "failed": "Not Met",
+    "na": "N/A", "notapplicable": "N/A", "n/a": "N/A",
+}
+
+
+def _norm_verdict(v) -> str:
+    key = re.sub(r"[^a-z/]", "", str(v or "").lower())
+    return _VERDICT_MAP.get(key, "N/A")
 
 SYSTEM = (
     "You are a strict but fair call-center QA evaluator. Score only the AGENT's "
@@ -37,7 +52,7 @@ def _score_category(category: str, items: list, ctx: dict) -> list:
         transcript=ctx["transcript"],
         agent=ctx["agent"], customer=ctx["customer"],
     )
-    out = llm.chat_json(prompt, system=SYSTEM)
+    out = llm.chat_json(prompt, system=SYSTEM, model=settings.analytics_model())
     rows = out.get("items", []) if isinstance(out, dict) else []
     for r in rows:
         r["category"] = category
@@ -88,4 +103,18 @@ def analyze(turns: list, roles: dict | None = None, on_progress=None) -> dict:
         if on_progress:
             on_progress(idx, len(scorecard), category)
         rows.extend(_score_category(category, [cp["name"] for cp in checkpoints], ctx))
-    return {"scorecard": rows, **_overall(rows, weights)}
+
+    # Attach STABLE ids + a constrained verdict enum + met/applicable flags so the
+    # webhook/DB carry keys that survive checkpoint renames, and rollups are exact.
+    cat_ids = {c["category"]: c.get("id") for c in scorecard}
+    cp_ids = {(c["category"], cp["name"]): cp.get("id")
+              for c in scorecard for cp in c.get("checkpoints", [])}
+    for r in rows:
+        r["verdict"] = _norm_verdict(r.get("verdict"))
+        r["met"] = 1 if r["verdict"] == "Met" else 0        # int flag (met-rate)
+        r["applicable"] = r["verdict"] != "N/A"             # bool flag (N/A-rate)
+        r["category_id"] = cat_ids.get(r.get("category"))
+        r["checkpoint_id"] = cp_ids.get((r.get("category"), r.get("checkpoint")))
+
+    return {"scorecard": rows, "scorecard_version": settings.scorecard_version(),
+            **_overall(rows, weights)}

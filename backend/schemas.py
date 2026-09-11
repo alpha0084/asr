@@ -105,9 +105,13 @@ class SummaryResponse(BaseModel):
 
 class ScorecardItem(BaseModel):
     category: str | None = None
+    category_id: str | None = Field(None, description="Stable category id (survives renames).")
     checkpoint: str | None = None
+    checkpoint_id: str | None = Field(None, description="Stable checkpoint id — key your rollups on this.")
     score: int | None = Field(None, description="1–5, or 0 for N/A.")
     verdict: str | None = Field(None, examples=["Met", "Partially Met", "Not Met", "N/A"])
+    met: int | None = Field(None, description="1 if verdict is exactly 'Met', else 0 (for met-rate).")
+    applicable: bool | None = Field(None, description="False when verdict is 'N/A' (for N/A-rate).")
     evidence: str | None = Field(None, description="Quote + [mm:ss] from the transcript.")
     suggestion: str | None = None
 
@@ -118,6 +122,7 @@ class Analytics(BaseModel):
     raw_score: int | None = None
     compliance_fail: bool | None = None
     checkpoints_scored: int | None = None
+    scorecard_version: int | None = Field(None, description="Bumps when the scorecard structure changes.")
     scorecard: list[ScorecardItem] = Field(default_factory=list)
 
 

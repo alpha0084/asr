@@ -9,7 +9,7 @@ load_dotenv(ROOT / ".env")
 
 # --- Secrets / models ---
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3").strip()
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
 
 # Diarization model (gated on HuggingFace — accept its license once, see README).
@@ -56,11 +56,23 @@ AUDIO_CLEANUP_FILTERS = os.getenv(
 # Third parties must send this in the `X-API-Key` header. Set in .env.
 API_KEY = os.getenv("API_KEY", "").strip()
 
+# --- Global webhook default (admin can still change it live; the live value is
+# persisted in the DB. These .env values are the fallback default so the webhook
+# stays configured even if settings are ever reset). ---
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
 # --- Database (dedicated PostgreSQL instance, isolated from production) ---
 # Loopback-only Postgres on port 5433 (see data/pgdata). Every transcribe/
 # summarize/analyze run is stored as a versioned row with the params used, plus
 # normalized turns/scorecard tables for SQL analytics + accuracy verification.
 DATABASE_URL = os.getenv("DATABASE_URL", "host=127.0.0.1 port=5433 dbname=asr user=asr_admin")
+
+# Worker pool: how many recordings to process in parallel. The queue is durable
+# (Postgres), so workers on other machines can pull from the same DB later — just
+# point them at the same DATABASE_URL. Sized to GPU capacity; raise as GPUs are added.
+WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
 
 # --- Paths ---
 DATA_DIR = ROOT / "data"
