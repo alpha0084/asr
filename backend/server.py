@@ -11,7 +11,7 @@ from pathlib import Path
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 
 from . import admin_api, admin_auth, db, jobs, metrics, public, schemas, webhooks
@@ -129,9 +129,10 @@ def _require(tid: str) -> dict:
     return job
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/", include_in_schema=False)
 def index():
-    return (FRONTEND / "index.html").read_text()
+    # No public web UI — this service is admin panel + API only.
+    return RedirectResponse(url="/admin")
 
 
 # ============================================================================
@@ -243,70 +244,11 @@ def task_full_result(tid: str):
 
 
 # ============================================================================
-# WEB UI  (local browser; no auth)
+# INTERNAL  (used by the admin panel — no public web UI)
 # ============================================================================
-@app.post("/api/jobs", tags=["Web UI"], summary="Web submit (file or URL)")
-async def create_job(
-    file: UploadFile = File(None),
-    url: str = Form(""),
-    model: str = Form(WHISPER_MODEL),
-    language: str = Form(""),
-    speakers: str = Form(""),
-    target_language: str = Form(""),
-):
-    """Browser upload/URL submit — transcribe + diarize + translate only."""
-    language = language.strip() or None
-    speakers_int = int(speakers) if speakers.strip().isdigit() else None
-
-    if file is not None and file.filename:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        dest = UPLOAD_DIR / file.filename
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-        src, name = str(dest), file.filename
-    elif url.strip():
-        u = url.strip()
-        name = u.split("?")[0].rsplit("/", 1)[-1] or "url-audio"
-        src = u
-    else:
-        raise HTTPException(400, "Provide an audio file or a URL.")
-
-    jid = jobs.create_job(src, name, model=model, language=language, speakers=speakers_int,
-                          target_language=target_language,
-                          include_summary=False, include_analytics=False)
-    return {"id": jid}
-
-
-@app.post("/api/jobs/{jid}/summarize", tags=["Web UI"], summary="Web: run summary")
-def summarize_job(jid: str):
-    if not jobs.trigger_stage(jid, "summary"):
-        raise HTTPException(409, "job not ready (transcribe must finish first)")
-    return {"ok": True, "stage": "summary"}
-
-
-@app.post("/api/jobs/{jid}/analyze", tags=["Web UI"], summary="Web: run analytics")
-def analyze_job(jid: str):
-    if not jobs.trigger_stage(jid, "analytics"):
-        raise HTTPException(409, "job not ready (transcribe must finish first)")
-    return {"ok": True, "stage": "analytics"}
-
-
-@app.get("/api/jobs", tags=["Web UI"], summary="Web: list jobs")
-def all_jobs():
-    return jobs.list_jobs()
-
-
-@app.get("/api/jobs/{jid}", tags=["Web UI"], summary="Web: job status")
-def one_job(jid: str):
-    job = jobs.get_job(jid)
-    if not job:
-        raise HTTPException(404, "job not found")
-    return job
-
-
-@app.get("/api/jobs/{jid}/audio", tags=["Web UI"], summary="Web: stream the recording")
+@app.get("/api/jobs/{jid}/audio", include_in_schema=False)
 def job_audio(jid: str):
-    """Serve the original recording for in-browser playback."""
+    """Serve the original recording for playback in the admin transcript view."""
     job = jobs.get_job(jid)
     path = (job.get("result") or {}).get("input") if job else None
     if not path or not os.path.exists(path):
