@@ -237,6 +237,21 @@ def revoke_key(kid: str):
     return {"ok": True}
 
 
+class KeyWebhookBody(BaseModel):
+    url: str = ""
+    secret: str = ""
+    events: list = []
+
+
+@router.put("/keys/{kid}/webhook", dependencies=_ADMIN,
+            summary="Set a key's webhook target (routes that environment's results)")
+def set_key_webhook(kid: str, body: KeyWebhookBody):
+    events = [e for e in (body.events or []) if e] or ["transcribed", "summarized", "analyzed"]
+    if not db.set_key_webhook(kid, body.url.strip(), body.secret.strip(), events):
+        raise HTTPException(404, "key not found")
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- dashboard: recordings
 @router.get("/tasks", dependencies=_ADMIN, summary="All recordings + statuses")
 def list_tasks():

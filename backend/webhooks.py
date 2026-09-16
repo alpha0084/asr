@@ -32,16 +32,40 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _target_for_task(tid: str) -> dict | None:
+    """Resolve where THIS recording's webhooks go, and with what secret/events.
+
+    Priority: per-request `callback_url` > the submitting API key's webhook > the
+    global webhook. This is what lets one shared ASR tool fan results out to
+    multiple environments (a key/webhook per environment). Returns None if nothing
+    is configured.
+    """
+    params = db.get_request_params(tid) or {}
+    cb = (params.get("callback_url") or "").strip()
+    if cb:
+        return {"url": cb, "secret": params.get("callback_secret") or "",
+                "events": ["transcribed", "summarized", "analyzed", "error"]}
+    kid = params.get("api_key_id")
+    if kid:
+        kw = db.get_key_webhook(kid)
+        if kw:
+            return kw
+    g = settings.webhook()
+    if g.get("enabled") and g.get("url"):
+        return {"url": g["url"], "secret": g.get("secret") or "", "events": g.get("events") or []}
+    return None
+
+
 def emit(job: dict, event_type: str):
-    """Queue a lifecycle event for the global webhook, if enabled + subscribed."""
-    cfg = settings.webhook()
-    if not cfg.get("enabled") or not cfg.get("url"):
+    """Queue a lifecycle event for delivery to the recording's resolved target."""
+    tid = job.get("id")
+    target = _target_for_task(tid)
+    if not target or not target.get("url"):
         return
-    if event_type not in (cfg.get("events") or []):
+    if event_type not in (target.get("events") or []):
         return
-    payload = {"event": event_type, "task_id": job.get("id"), "data": public.public_result(job)}
-    db.add_webhook_event(uuid.uuid4().hex[:16], job.get("id"), event_type,
-                         cfg["url"], payload, _now())
+    payload = {"event": event_type, "task_id": tid, "data": public.public_result(job)}
+    db.add_webhook_event(uuid.uuid4().hex[:16], tid, event_type, target["url"], payload, _now())
     start()
     _wake.set()
 
@@ -71,12 +95,14 @@ def _ready(ev: dict, now: float) -> bool:
 
 def _attempt(ev: dict) -> str:
     """One delivery attempt; updates the row; returns the new status."""
-    cfg = settings.webhook()
+    # Re-resolve the target so we sign with the RIGHT secret for this recording's
+    # environment (per-request / per-key / global). URL is fixed at emit time.
+    target = _target_for_task(ev["task_id"]) or {}
     body = json.dumps(ev["payload_json"] if isinstance(ev["payload_json"], (dict, list))
                       else json.loads(ev["payload_json"]), ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json", "User-Agent": "asr-tool/1.0",
                "X-ASR-Event": ev["event_type"], "X-ASR-Task": ev["task_id"] or ""}
-    secret = cfg.get("secret") or ""
+    secret = target.get("secret") or ""
     if secret:
         headers["X-ASR-Signature"] = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 

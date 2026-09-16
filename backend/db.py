@@ -107,6 +107,11 @@ _DDL = [
     "ALTER TABLE scorecard_items ADD COLUMN IF NOT EXISTS applicable BOOLEAN",
     "ALTER TABLE analytics ADD COLUMN IF NOT EXISTS scorecard_version INT",
     "CREATE INDEX IF NOT EXISTS idx_sci_cpid ON scorecard_items(checkpoint_id)",
+    # Per-key webhook routing: each API key (= one environment) can target its own
+    # listener, so one shared ASR tool fans results out to staging/prod separately.
+    "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS webhook_url TEXT",
+    "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS webhook_secret TEXT",
+    "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS webhook_events JSONB",
 ]
 
 
@@ -412,7 +417,8 @@ def add_api_key(kid: str, label: str, key_hash: str, prefix: str, created_at: st
 
 def list_api_keys() -> list:
     with _conn() as c, c.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT id, label, prefix, created_at, revoked_at FROM api_keys "
+        cur.execute("SELECT id, label, prefix, created_at, revoked_at, "
+                    "webhook_url, webhook_secret, webhook_events FROM api_keys "
                     "ORDER BY created_at DESC")
         rows = cur.fetchall()
     for r in rows:
@@ -420,6 +426,40 @@ def list_api_keys() -> list:
             if r.get(tk) is not None:
                 r[tk] = r[tk].isoformat()
     return rows
+
+
+def key_id_for_hash(key_hash: str) -> str | None:
+    """Which (active) key issued this hash — used to tag each recording with its key."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT id FROM api_keys WHERE key_hash=%s AND revoked_at IS NULL", (key_hash,))
+        r = cur.fetchone()
+        return r[0] if r else None
+
+
+def set_key_webhook(kid: str, url: str, secret: str, events: list) -> bool:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE api_keys SET webhook_url=%s, webhook_secret=%s, webhook_events=%s "
+                    "WHERE id=%s", (url or None, secret or None, Json(events or []), kid))
+        return cur.rowcount > 0
+
+
+def get_key_webhook(kid: str) -> dict | None:
+    """The webhook target configured for a key, or None if unset/revoked."""
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT webhook_url, webhook_secret, webhook_events FROM api_keys "
+                    "WHERE id=%s AND revoked_at IS NULL", (kid,))
+        r = cur.fetchone()
+    if not r or not r.get("webhook_url"):
+        return None
+    return {"url": r["webhook_url"], "secret": r.get("webhook_secret") or "",
+            "events": r.get("webhook_events") or ["transcribed", "summarized", "analyzed", "error"]}
+
+
+def get_request_params(tid: str) -> dict:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT request_params FROM recordings WHERE id=%s", (tid,))
+        r = cur.fetchone()
+    return (r[0] if r and r[0] else {}) or {}
 
 
 def active_key_hashes() -> set:

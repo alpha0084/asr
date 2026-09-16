@@ -142,7 +142,7 @@ def index():
           response_model=schemas.CreateTaskResponse, responses=_ERRORS,
           summary="Enqueue a recording",
           response_description="Task accepted; poll `status_url`.")
-def create_task(req: schemas.TranscribeRequest):
+def create_task(req: schemas.TranscribeRequest, key: str | None = Depends(require_api_key)):
     """Queue a recording for **transcribe + diarize + translate**.
 
     Summary and QA analytics are **not** run here — call `/summarize` and
@@ -153,11 +153,13 @@ def create_task(req: schemas.TranscribeRequest):
     language = None if req.language.strip().lower() in ("auto", "") else req.language.strip()
     target = "English" if req.translate_to_english else None
     name = req.audio_path.split("?")[0].rsplit("/", 1)[-1] or "audio"
+    # Tag with the submitting key so its results webhook to that key's environment.
+    key_id = db.key_id_for_hash(admin_auth.hash_api_key(key)) if key else None
 
     tid = jobs.create_job(
         req.audio_path, name, model=model, language=language, speakers=req.speakers,
         target_language=target, include_summary=False, include_analytics=False,
-        callback_url=req.callback_url)
+        callback_url=req.callback_url, api_key_id=key_id)
     return {"task_id": tid, "status": "queued", "status_url": f"/api/v1/tasks/{tid}",
             "message": "queued"}
 

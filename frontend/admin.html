@@ -491,19 +491,39 @@ async function loadWebLog(){ const evs=await api("/webhooks?limit=100");
 }
 async function refire(id){ try{ await api(`/webhooks/${id}/redeliver`,{method:"POST"}); toast("re-fire queued"); setTimeout(loadWebLog,800); }catch(e){ toast(e.message,true) } }
 
-/* ---------- api keys ---------- */
-async function viewKeys(){ const ks=await api("/keys");
+/* ---------- api keys (one per environment, each with its own webhook) ---------- */
+const KW_EVENTS=["transcribed","summarized","analyzed"];
+async function viewKeys(){
   el("view").innerHTML=`<div class="card"><h2>API keys (X-API-Key)</h2>
-    <div class="row"><div><input id="k_label" placeholder="label (e.g. partner-x)"></div>
-    <div style="flex:none"><button onclick="createKey()">Create key</button></div></div><div id="newkey"></div>
-    <div class="tbl-wrap"><table style="margin-top:12px"><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Status</th><th></th></tr>
-    ${ks.map(k=>`<tr><td>${esc(k.label)}</td><td class="muted">${esc(k.prefix)}…</td><td class="muted" style="font-size:11px">${fdate(k.created_at)}</td>
-      <td>${k.revoked_at?'<span class="badge b-err">revoked</span>':'<span class="badge b-done">active</span>'}</td>
-      <td>${k.revoked_at?"":`<button class="sm danger" onclick="revokeKey('${k.id}')">Revoke</button>`}</td></tr>`).join("")}</table></div></div>`;
+    <p class="muted" style="font-size:12px">Use <b>one key per environment</b> (e.g. staging, production). Set each key's webhook below so that environment's recordings deliver to its own listener — that's how one ASR tool serves both.</p>
+    <div class="row"><div><input id="k_label" placeholder="label (e.g. staging / production)"></div>
+    <div style="flex:none"><button onclick="createKey()">Create key</button></div></div><div id="newkey"></div></div>
+    <div id="keylist">loading…</div>`;
+  loadKeyList();
+}
+async function loadKeyList(){ const ks=await api("/keys");
+  el("keylist").innerHTML = ks.length ? ks.map(keyCard).join("") : `<div class="card"><p class="muted">No keys yet — create one per environment.</p></div>`;
+}
+function keyCard(k){
+  const ev=k.webhook_events||KW_EVENTS;
+  const wh=k.revoked_at?"":`<div class="cat" style="margin-top:12px"><div class="chead"><b>🔔 Webhook for this environment</b>
+      ${k.webhook_url?'<span class="badge b-done">configured</span>':'<span class="badge b-queue">not set</span>'}</div>
+    <label>Listener URL</label><input id="kw_url_${k.id}" value="${esc(k.webhook_url||'')}" placeholder="https://<env>.rhymecall.../integrations/asr/webhook">
+    <label style="margin-top:8px">Signing secret (HMAC-SHA256, sent as X-ASR-Signature)</label><input id="kw_sec_${k.id}" value="${esc(k.webhook_secret||'')}" placeholder="this environment's secret">
+    <label style="margin-top:8px">Fire on</label><div>${KW_EVENTS.map(e=>`<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="kwev_${k.id}" value="${e}" ${ev.includes(e)?"checked":""} style="width:auto"> ${e}</label>`).join("")}</div>
+    <button class="sm" style="margin-top:10px" onclick="saveKeyWebhook('${k.id}')">Save webhook</button></div>`;
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+    <div><b>${esc(k.label)}</b> <span class="muted" style="font-size:12px">${esc(k.prefix)}… · ${fdate(k.created_at)}</span>
+      ${k.revoked_at?'<span class="badge b-err">revoked</span>':'<span class="badge b-done">active</span>'}</div>
+    ${k.revoked_at?"":`<button class="sm danger" onclick="revokeKey('${k.id}')">Revoke</button>`}</div>${wh}</div>`;
 }
 async function createKey(){ try{ const r=await api("/keys",{method:"POST",body:JSON.stringify({label:el("k_label").value})});
-  el("newkey").innerHTML=`<div class="card" style="border-color:var(--good);margin-top:12px"><b>Copy this key now — it won't be shown again:</b><pre>${esc(r.key)}</pre></div>`; }catch(e){ toast(e.message,true) } }
-async function revokeKey(id){ if(!confirm("Revoke this key?"))return; try{ await api(`/keys/${id}`,{method:"DELETE"}); toast("revoked"); viewKeys(); }catch(e){ toast(e.message,true) } }
+  el("newkey").innerHTML=`<div class="card" style="border-color:var(--good);margin-top:12px"><b>Copy this key now — it won't be shown again:</b><pre>${esc(r.key)}</pre><span class="muted" style="font-size:12px">Put this in that environment's <code>ASR_API_KEY</code>, then set its webhook below.</span></div>`;
+  el("k_label").value=""; loadKeyList(); }catch(e){ toast(e.message,true) } }
+async function saveKeyWebhook(id){ const events=[...document.querySelectorAll(".kwev_"+id+":checked")].map(x=>x.value);
+  try{ await api(`/keys/${id}/webhook`,{method:"PUT",body:JSON.stringify({url:el("kw_url_"+id).value,secret:el("kw_sec_"+id).value,events})});
+    toast("webhook saved for this key"); loadKeyList(); }catch(e){ toast(e.message,true) } }
+async function revokeKey(id){ if(!confirm("Revoke this key?"))return; try{ await api(`/keys/${id}`,{method:"DELETE"}); toast("revoked"); loadKeyList(); }catch(e){ toast(e.message,true) } }
 
 /* ---------- admins ---------- */
 async function viewAdmins(){ const list=await api("/admins");

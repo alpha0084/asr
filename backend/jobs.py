@@ -51,14 +51,22 @@ def _record_run(jid, run_type, params, result):
 
 # ---------------------------------------------------------------- public API
 def create_job(src, filename, model=None, language=None, speakers=None, target_language=None,
-               include_summary=False, include_analytics=False, callback_url=None) -> str:
-    """Enqueue a recording. Returns immediately with a job id; workers process it."""
+               include_summary=False, include_analytics=False, callback_url=None,
+               api_key_id=None) -> str:
+    """Enqueue a recording. Returns immediately with a job id; workers process it.
+
+    `api_key_id` tags the recording with the key that submitted it, so lifecycle
+    webhooks fan out to THAT key's configured listener — this is how one shared ASR
+    tool serves multiple environments (staging/prod) with a key per environment.
+    `callback_url` (optional) overrides that with a per-request target.
+    """
     jid = uuid.uuid4().hex[:12]
     final_stage = ("analytics" if include_analytics else
                    "summary" if include_summary else "transcribe")
     params = {
         "model": model, "language": language, "speakers": speakers,
         "target_language": target_language, "callback_url": callback_url,
+        "api_key_id": api_key_id,
         "include_summary": include_summary, "include_analytics": include_analytics,
         "final_stage": final_stage,
     }
@@ -217,7 +225,7 @@ def _run_transcribe(claim):
     except Exception as e:
         db.set_recording(jid, status="error", error=f"{type(e).__name__}: {e}")
         _clear_live(jid)
-        _deliver(jid, p.get("callback_url"))
+        webhooks.emit(get_job(jid), "error")
         return
 
     db.set_recording(jid, status="done", stage="Done", result=result)
@@ -232,8 +240,6 @@ def _run_transcribe(claim):
     elif p.get("include_analytics"):
         db.set_recording(jid, analytics_status="queued")
         _wake.set()
-    if p.get("final_stage") == "transcribe":
-        _deliver(jid, p.get("callback_url"))
 
 
 def _run_stage(claim, stage):
@@ -257,36 +263,7 @@ def _run_stage(claim, stage):
         _clear_live(jid)
         return
 
-    # Chain analytics after summary for the all-in-one path; fire callback on the last stage.
+    # Chain analytics after summary for the all-in-one path.
     if stage == "summary" and p.get("include_analytics"):
         db.set_recording(jid, analytics_status="queued")
         _wake.set()
-    if p.get("final_stage") == stage:
-        _deliver(jid, p.get("callback_url"))
-
-
-# ---------------------------------------------------------------- per-request callback
-def _deliver(jid, callback_url):
-    if not callback_url:
-        return
-    _post_callback(callback_url, public.public_result(get_job(jid)))
-
-
-def _post_callback(url, payload, retries=2) -> str:
-    data = json.dumps(payload).encode("utf-8")
-    last = "not attempted"
-    for attempt in range(retries + 1):
-        try:
-            req = urllib.request.Request(
-                url, data=data, method="POST",
-                headers={"Content-Type": "application/json", "User-Agent": "asr-tool/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                print(f"[callback] POST {url} -> {resp.status}", flush=True)
-                return f"delivered ({resp.status})"
-        except urllib.error.HTTPError as e:
-            last = f"HTTP {e.code} from your server"
-            print(f"[callback] attempt {attempt+1}: {last}", flush=True)
-        except Exception as e:
-            last = f"{type(e).__name__}: {e}"
-            print(f"[callback] attempt {attempt+1} failed: {last}", flush=True)
-    return f"failed — {last}"
