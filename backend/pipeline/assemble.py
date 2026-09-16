@@ -21,38 +21,48 @@ def _seg_text(seg: dict) -> str:
     return txt
 
 
-def dedupe_overlapping_segments(segments: list) -> list:
-    """Drop whisper segments that are near-duplicates of a recent segment AND overlap
-    it in time.
+_DUP_GAP = 3.0        # seconds — a repeat within this window of a near-identical segment
+_DUP_SIM = 0.85       # text-similarity ratio above which two segments are "the same"
+_DUP_MIN_LEN = 8      # ignore short backchannels ("जी जी", "haan haan")
 
-    On low-quality (8kHz mono) audio Whisper sometimes emits the same utterance twice
-    over an overlapping time span; diarization then assigns the two copies to different
-    speakers, surfacing as one utterance repeated under both Agent and Customer. We drop
-    the later copy. The TIME-OVERLAP requirement is what distinguishes this artifact from
-    a legitimate sequential repeat (e.g. one speaker echoing another) — genuine repeats
-    are consecutive in time, not overlapping — so those are kept.
+
+def dedupe_overlapping_segments(segments: list) -> list:
+    """Drop Whisper repetition-hallucination duplicates.
+
+    On low-quality (8kHz mono) audio Whisper sometimes transcribes the same utterance
+    twice — either overlapping or back-to-back with a small gap. Diarization then puts
+    the two copies under different speakers, surfacing as one sentence repeated under
+    both Agent and Customer. We collapse such near-identical, temporally-adjacent
+    segments to a single copy, KEEPING THE LATER one (in practice its timestamp sits in
+    the true speaker's region, so it gets attributed correctly).
+
+    Only long (>= _DUP_MIN_LEN chars), highly-similar (>= _DUP_SIM) segments within
+    _DUP_GAP seconds are collapsed, so genuine short backchannels and well-separated
+    repeats are preserved.
     """
     kept: list = []
     for seg in segments:
         s0, s1 = seg.get("start"), seg.get("end")
         txt = _norm_text(_seg_text(seg))
-        is_dup = False
-        if txt and len(txt) >= 8 and s0 is not None and s1 is not None and s1 > s0:
-            for k in kept[-3:]:                       # only compare against near neighbours
+        dup_idx = None
+        if txt and len(txt) >= _DUP_MIN_LEN and s0 is not None and s1 is not None and s1 > s0:
+            for j in range(len(kept) - 1, max(-1, len(kept) - 4), -1):   # recent neighbours
+                k = kept[j]
                 k0, k1 = k.get("start"), k.get("end")
                 if k0 is None or k1 is None or k1 <= k0:
                     continue
                 ov = _overlap(s0, s1, k0, k1)
-                shorter = min(s1 - s0, k1 - k0) or 1e-9
-                if ov / shorter < 0.5:                # must overlap in time to be a duplicate
+                gap = 0.0 if ov > 0 else max(s0 - k1, k0 - s1)
+                if gap > _DUP_GAP:                    # too far apart to be a repeat artifact
                     continue
                 ktxt = _norm_text(_seg_text(k))
                 if (txt in ktxt or ktxt in txt
-                        or difflib.SequenceMatcher(None, txt, ktxt).ratio() >= 0.8):
-                    is_dup = True
+                        or difflib.SequenceMatcher(None, txt, ktxt).ratio() >= _DUP_SIM):
+                    dup_idx = j
                     break
-        if not is_dup:
-            kept.append(seg)
+        if dup_idx is not None:
+            del kept[dup_idx]        # drop the earlier copy; keep this (later) one
+        kept.append(seg)
     return kept
 
 
