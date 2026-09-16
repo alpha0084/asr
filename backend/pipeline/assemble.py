@@ -1,9 +1,59 @@
 """Stage 4 — merge transcription + diarization into speaker-labeled turns + talk stats."""
+import difflib
+import re
 from collections import defaultdict
 
 
 def _overlap(a0, a1, b0, b1) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _norm_text(s: str) -> str:
+    """Lowercase, keep word chars + Devanagari, collapse whitespace — for comparing
+    two transcript segments regardless of punctuation/spacing."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\wऀ-ॿ]+", " ", (s or "").lower())).strip()
+
+
+def _seg_text(seg: dict) -> str:
+    txt = seg.get("text")
+    if not txt:
+        txt = " ".join((w.get("word") or "") for w in (seg.get("words") or []))
+    return txt
+
+
+def dedupe_overlapping_segments(segments: list) -> list:
+    """Drop whisper segments that are near-duplicates of a recent segment AND overlap
+    it in time.
+
+    On low-quality (8kHz mono) audio Whisper sometimes emits the same utterance twice
+    over an overlapping time span; diarization then assigns the two copies to different
+    speakers, surfacing as one utterance repeated under both Agent and Customer. We drop
+    the later copy. The TIME-OVERLAP requirement is what distinguishes this artifact from
+    a legitimate sequential repeat (e.g. one speaker echoing another) — genuine repeats
+    are consecutive in time, not overlapping — so those are kept.
+    """
+    kept: list = []
+    for seg in segments:
+        s0, s1 = seg.get("start"), seg.get("end")
+        txt = _norm_text(_seg_text(seg))
+        is_dup = False
+        if txt and len(txt) >= 8 and s0 is not None and s1 is not None and s1 > s0:
+            for k in kept[-3:]:                       # only compare against near neighbours
+                k0, k1 = k.get("start"), k.get("end")
+                if k0 is None or k1 is None or k1 <= k0:
+                    continue
+                ov = _overlap(s0, s1, k0, k1)
+                shorter = min(s1 - s0, k1 - k0) or 1e-9
+                if ov / shorter < 0.5:                # must overlap in time to be a duplicate
+                    continue
+                ktxt = _norm_text(_seg_text(k))
+                if (txt in ktxt or ktxt in txt
+                        or difflib.SequenceMatcher(None, txt, ktxt).ratio() >= 0.8):
+                    is_dup = True
+                    break
+        if not is_dup:
+            kept.append(seg)
+    return kept
 
 
 def _speaker_for(t0: float, t1: float, dia_turns: list) -> str | None:
@@ -84,7 +134,7 @@ def assign_speakers(segments: list, dia_turns: list) -> list:
             if text:
                 runs.append(run)
 
-    for seg in segments:
+    for seg in dedupe_overlapping_segments(segments):
         words = [
             w for w in (seg.get("words") or [])
             if w.get("start") is not None and w.get("end") is not None
