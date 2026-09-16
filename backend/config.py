@@ -56,6 +56,12 @@ AUDIO_CLEANUP_FILTERS = os.getenv(
 # Third parties must send this in the `X-API-Key` header. Set in .env.
 API_KEY = os.getenv("API_KEY", "").strip()
 
+# --- Admin portal ---
+# First admin seeded on boot from ADMIN_EMAIL + ADMIN_PASSWORD (if no admins exist
+# yet). After that, admins are managed in the DB (admin_users table) and more can be
+# added from the portal — the portal supports multiple email/password logins.
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@asr.local").strip().lower()
+
 # --- Global webhook default (admin can still change it live; the live value is
 # persisted in the DB. These .env values are the fallback default so the webhook
 # stays configured even if settings are ever reset). ---

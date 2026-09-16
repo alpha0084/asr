@@ -1,26 +1,33 @@
-"""Single-admin authentication for the portal.
+"""Multi-admin authentication for the portal.
 
-Password is stored as a pbkdf2-sha256 hash in settings (never in plain text).
-Login mints an in-process session token (bearer or cookie) with a TTL — fine for
-a single-operator tool; no external session store needed.
+Admins are rows in the `admin_users` table (email + pbkdf2-sha256 password hash).
+Login mints an in-process session token (bearer or cookie) with a TTL that carries
+the admin's identity. The first admin is seeded on boot from ADMIN_EMAIL +
+ADMIN_PASSWORD; after that, admins are created from the portal.
 """
 import hashlib
 import hmac
 import os
 import secrets
 import time
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import Cookie, Header, HTTPException
 
-from . import db
-from .settings import K_ADMIN
+from . import config, db
 
 _ITERATIONS = 240_000
 _SESSION_TTL = int(os.getenv("ADMIN_SESSION_TTL", str(12 * 3600)))  # seconds
-_sessions: dict[str, float] = {}   # token -> expiry (epoch seconds)
+# token -> {"exp": epoch, "id":.., "email":.., "name":..}
+_sessions: dict[str, dict] = {}
 
 
-# ---------------------------------------------------------------- password
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------- password hashing
 def hash_password(pw: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, _ITERATIONS)
@@ -36,60 +43,80 @@ def verify_password(pw: str, stored: str) -> bool:
         return False
 
 
-def set_password(pw: str):
-    db.set_setting(K_ADMIN, hash_password(pw))
-
-
 def hash_api_key(key: str) -> str:
     """Fast hash for high-entropy API tokens (pbkdf2 is overkill for random keys)."""
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+# ---------------------------------------------------------------- admin users
+def create_admin(email: str, password: str, name: str = "") -> dict:
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("a valid email is required")
+    if len(password or "") < 6:
+        raise ValueError("password must be at least 6 characters")
+    if db.get_admin_by_email(email):
+        raise ValueError("an admin with that email already exists")
+    uid = uuid.uuid4().hex[:12]
+    db.add_admin_user(uid, email, name.strip() or email.split("@")[0], hash_password(password), _now())
+    return {"id": uid, "email": email, "name": name.strip() or email.split("@")[0]}
+
+
 def is_configured() -> bool:
-    return bool(db.get_setting(K_ADMIN))
+    return db.count_admin_users() > 0
 
 
 def bootstrap():
-    """Seed the admin password from ADMIN_PASSWORD on first run (if not set yet)."""
-    if not is_configured():
-        env_pw = os.getenv("ADMIN_PASSWORD", "").strip()
-        if env_pw:
-            set_password(env_pw)
+    """Seed the first admin from ADMIN_EMAIL + ADMIN_PASSWORD on first run."""
+    if is_configured():
+        return
+    pw = os.getenv("ADMIN_PASSWORD", "").strip()
+    if pw:
+        try:
+            create_admin(config.ADMIN_EMAIL, pw, "Administrator")
+        except ValueError:
+            pass
 
 
 # ---------------------------------------------------------------- sessions
-def login(pw: str) -> str | None:
-    stored = db.get_setting(K_ADMIN)
-    if not stored or not verify_password(pw, stored):
+def login(email: str, password: str) -> dict | None:
+    user = db.get_admin_by_email((email or "").strip().lower())
+    if not user or not verify_password(password, user.get("password_hash", "")):
         return None
     token = secrets.token_urlsafe(32)
-    _sessions[token] = time.time() + _SESSION_TTL
-    return token
+    _sessions[token] = {"exp": time.time() + _SESSION_TTL, "id": user["id"],
+                        "email": user["email"], "name": user.get("name") or user["email"]}
+    db.set_admin_last_login(user["id"], _now())
+    return {"token": token, "email": user["email"], "name": user.get("name") or user["email"]}
 
 
 def logout(token: str):
     _sessions.pop(token, None)
 
 
-def _valid(token: str | None) -> bool:
+def _session(token: str | None) -> dict | None:
     if not token:
-        return False
-    exp = _sessions.get(token)
-    if not exp:
-        return False
-    if exp < time.time():
+        return None
+    s = _sessions.get(token)
+    if not s:
+        return None
+    if s["exp"] < time.time():
         _sessions.pop(token, None)
-        return False
-    return True
+        return None
+    return s
 
 
 def require_admin(authorization: str | None = Header(None),
-                  admin_session: str | None = Cookie(None)) -> str:
-    """FastAPI dependency: accept a Bearer token or the admin_session cookie."""
+                  admin_session: str | None = Cookie(None)) -> dict:
+    """FastAPI dependency: accept a Bearer token or the admin_session cookie.
+
+    Returns the session identity dict {token, id, email, name}.
+    """
     token = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
     token = token or admin_session
-    if not _valid(token):
+    s = _session(token)
+    if not s:
         raise HTTPException(401, "admin authentication required")
-    return token
+    return {"token": token, **s}

@@ -5,385 +5,406 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ASR Admin</title>
 <style>
-  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--text:#e6e8ec;
-    --muted:#9aa3b2;--accent:#5b8cff;--accent2:#3ecf8e;--err:#ff6b6b;--warn:#f0b429;--radius:12px}
-  @media (prefers-color-scheme:light){:root{--bg:#f5f6f8;--panel:#fff;--panel2:#f0f2f5;
-    --line:#e2e5ea;--text:#1a1d24;--muted:#5b6472}}
+  :root{
+    --bg:#0e1014;--panel:#161a22;--panel2:#1d222c;--line:#2a3040;--text:#e7eaf0;--muted:#93a0b4;
+    --accent:#5b8cff;--accent2:#3ecf8e;--err:#ff6b6b;--warn:#f0b429;--good:#3ecf8e;
+    --radius:14px;--sidebar:224px;--shadow:0 8px 30px rgba(0,0,0,.35);
+  }
+  @media (prefers-color-scheme:light){:root{--bg:#eef1f5;--panel:#fff;--panel2:#f3f5f9;--line:#e2e6ee;
+    --text:#161a22;--muted:#5d6a7d;--shadow:0 8px 30px rgba(20,30,50,.10)}}
   *{box-sizing:border-box}
-  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    background:var(--bg);color:var(--text)}
-  .wrap{max-width:1100px;margin:0 auto;padding:24px 16px}
-  h1{font-size:20px;margin:0} h2{font-size:16px;margin:0 0 14px}
-  .muted{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--accent2)}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:18px}
+  html,body{margin:0;height:100%}
+  body{font:14.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;background:var(--bg);color:var(--text)}
+  h1{font-size:19px;margin:0}h2{font-size:15px;margin:0 0 12px;font-weight:650}h3{font-size:13px;margin:0 0 8px;font-weight:650}
+  .muted{color:var(--muted)}.err{color:var(--err)}.ok{color:var(--good)}
+  a{color:var(--accent)}
   input,select,textarea{width:100%;padding:9px 11px;background:var(--panel2);border:1px solid var(--line);
-    border-radius:9px;color:var(--text);font-size:14px;font-family:inherit}
+    border-radius:10px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
   label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
-  button{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:9px 16px;font-size:14px;
-    font-weight:600;cursor:pointer} button.sm{padding:5px 10px;font-size:12px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 15px;font-size:13.5px;
+    font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
+  button:hover{filter:brightness(1.07)}button:active{transform:translateY(1px)}
+  button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
   button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
-  button.danger{background:var(--err)} button.warn{background:var(--warn);color:#111}
+  button.danger{background:var(--err)}button.warn{background:var(--warn);color:#111}
   button:disabled{opacity:.5;cursor:not-allowed}
-  .row{display:flex;gap:12px;flex-wrap:wrap} .row>div{flex:1;min-width:150px}
-  .hidden{display:none}
-  nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
-  nav .tab{padding:7px 14px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
-    cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
-  nav .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1;min-width:150px}
+  .hidden{display:none!important}
+  .badge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--panel2);border:1px solid var(--line);display:inline-block}
+  .b-done{color:var(--good);border-color:var(--good)}.b-run{color:var(--accent);border-color:var(--accent)}
+  .b-err{color:var(--err);border-color:var(--err)}.b-queue{color:var(--warn);border-color:var(--warn)}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:8px 8px;border-top:1px solid var(--line);vertical-align:top}
-  th{color:var(--muted);font-weight:600;font-size:12px}
-  .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap;
-    background:var(--panel2);border:1px solid var(--line)}
-  .b-done{color:var(--accent2);border-color:var(--accent2)} .b-run{color:var(--accent);border-color:var(--accent)}
-  .b-err{color:var(--err);border-color:var(--err)} .b-queue{color:var(--warn);border-color:var(--warn)}
+  th,td{text-align:left;padding:9px 8px;border-top:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em}
+  .tbl-wrap{overflow-x:auto}
   .actions{display:flex;gap:5px;flex-wrap:wrap}
-  .kv{display:flex;gap:8px;margin:4px 0}.kv input{flex:1}
-  .cat{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--panel2)}
-  .cat .chead{display:flex;gap:8px;align-items:center;margin-bottom:8px}
-  .cat .chead input{flex:1}
+  .kv{display:flex;gap:8px;margin:6px 0}.kv input{flex:1}
+  .cat{border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:12px;background:var(--panel2)}
+  .cat .chead{display:flex;gap:8px;align-items:center;margin-bottom:8px}.cat .chead input{flex:1}
   .w{max-width:90px;flex:none!important}
-  pre{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px;
-    overflow:auto;font-size:12px;max-height:60vh}
-  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--line);
-    border-radius:9px;padding:12px 16px;box-shadow:0 6px 24px rgba(0,0,0,.3);font-size:14px;z-index:9}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;font-size:12px;max-height:60vh}
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--good);
+    border-radius:10px;padding:12px 16px;box-shadow:var(--shadow);font-size:14px;z-index:99;animation:slidein .2s}
+  @keyframes slidein{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+  /* layout */
+  #shell{display:flex;min-height:100vh}
+  #side{width:var(--sidebar);background:var(--panel);border-right:1px solid var(--line);padding:16px 12px;
+    display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow:auto}
+  #side .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;padding:6px 8px 14px}
+  #side .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good)}
+  .navitem{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer;color:var(--muted);font-weight:600;font-size:13.5px}
+  .navitem:hover{background:var(--panel2);color:var(--text)}
+  .navitem.active{background:var(--accent);color:#fff}
+  .navitem .ic{width:18px;text-align:center}
+  #side .foot{margin-top:auto;border-top:1px solid var(--line);padding-top:12px;font-size:12px;color:var(--muted)}
+  #main{flex:1;min-width:0;display:flex;flex-direction:column}
+  #topbar{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);z-index:8}
+  #topbar #ham{display:none}
+  #content{padding:22px;max-width:1180px;width:100%;margin:0 auto}
+  /* dashboard */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:16px}
+  .metric{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+  .metric .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .metric .lbl{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .metric .big{font-size:26px;font-weight:700;line-height:1.1}
+  .metric .sub{font-size:12px;color:var(--muted);margin-top:3px}
+  .bar{height:8px;border-radius:6px;background:var(--panel2);overflow:hidden;margin-top:10px}
+  .bar > i{display:block;height:100%;border-radius:6px;background:var(--accent);width:0;transition:width .6s ease,background .3s}
+  .bar.g > i{background:var(--good)}.bar.a > i{background:var(--warn)}.bar.r > i{background:var(--err)}
+  .chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:16px;background:var(--panel2);border:1px solid var(--line)}
+  .spin{width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:sp .8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .pbar{height:6px;border-radius:5px;background:var(--panel2);overflow:hidden;position:relative}
+  .pbar > i{position:absolute;left:-40%;width:40%;height:100%;border-radius:5px;background:var(--accent);animation:indeter 1.2s infinite}
+  @keyframes indeter{0%{left:-40%}100%{left:100%}}
+  .proc{border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:11px;padding:10px 12px;margin-bottom:8px}
+  .dot-live{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block;animation:pulse 1.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .adm-turn{display:flex;gap:10px;padding:7px 8px;border-top:1px solid var(--line);border-radius:7px;transition:background .15s}
   .stat{display:inline-block;margin-right:18px;font-size:13px}.stat b{font-size:18px;display:block}
+  @media (max-width:760px){
+    #side{position:fixed;left:0;top:0;z-index:20;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow)}
+    #side.open{transform:none}
+    #topbar #ham{display:inline-flex}
+    :root{--sidebar:0px}
+    #content{padding:16px}
+  }
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:15;display:none}
+  .scrim.open{display:block}
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <!-- LOGIN -->
-  <div id="login" class="card hidden" style="max-width:380px;margin:60px auto">
-    <h1>ASR Admin</h1>
-    <p class="muted" id="loginhint">Enter the admin password.</p>
-    <label>Password</label>
-    <input id="pw" type="password" onkeydown="if(event.key==='Enter')doLogin()">
-    <p id="loginerr" class="err hidden"></p>
-    <button style="width:100%;margin-top:12px" onclick="doLogin()">Log in</button>
+<!-- LOGIN -->
+<div id="login" class="hidden" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div class="card" style="max-width:390px;width:100%;margin:0">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good)"></span><h1>ASR Admin</h1></div>
+    <p class="muted" id="loginhint" style="font-size:13px">Sign in with your email and password.</p>
+    <label style="margin-top:8px">Email</label>
+    <input id="lemail" type="email" autocomplete="username" placeholder="you@company.com" onkeydown="if(event.key==='Enter')el('lpw').focus()">
+    <label style="margin-top:10px">Password</label>
+    <input id="lpw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <p id="loginerr" class="err hidden" style="font-size:13px"></p>
+    <button style="width:100%;margin-top:14px" onclick="doLogin()">Sign in</button>
   </div>
+</div>
 
-  <!-- APP -->
-  <div id="app" class="hidden">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <h1>ASR Admin Portal</h1>
-      <button class="ghost sm" onclick="doLogout()">Log out</button>
+<!-- APP -->
+<div id="shell" class="hidden">
+  <div class="scrim" id="scrim" onclick="toggleNav(false)"></div>
+  <aside id="side">
+    <div class="brand"><span class="dot"></span> ASR Portal</div>
+    <div id="nav"></div>
+    <div class="foot">
+      <div id="whoami" style="margin-bottom:8px"></div>
+      <button class="ghost sm" style="width:100%" onclick="doLogout()">Log out</button>
     </div>
-    <nav id="tabs"></nav>
-    <div id="view"></div>
+  </aside>
+  <div id="main">
+    <div id="topbar">
+      <button class="ghost sm" id="ham" onclick="toggleNav()">☰</button>
+      <h1 id="ptitle">Dashboard</h1>
+      <span id="livepill" class="chip" style="margin-left:auto"></span>
+    </div>
+    <div id="content"><div id="view"></div><div id="detail"></div></div>
   </div>
 </div>
 
 <script>
-const API = "/admin/api";
-async function api(path, opts={}){
-  const r = await fetch(API+path, {credentials:"same-origin",
-    headers:{"Content-Type":"application/json"}, ...opts});
+const API="/admin/api";
+async function api(path,opts={}){
+  const r=await fetch(API+path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...opts});
   if(r.status===401){ showLogin(); throw new Error("unauthorized"); }
   if(!r.ok){ const t=await r.text(); throw new Error(t||r.status); }
   return r.status===204?null:r.json();
 }
 function el(id){return document.getElementById(id)}
+function esc(s){return (s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function toast(msg,bad){const t=document.createElement("div");t.className="toast";
-  t.style.borderColor=bad?"var(--err)":"var(--accent2)";t.textContent=msg;
-  document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
-function esc(s){return (s??"").toString().replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+  t.style.borderLeftColor=bad?"var(--err)":"var(--good)";t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),2800)}
 function badge(s){if(!s)return '<span class="badge">—</span>';
-  const c=s==="done"?"b-done":/error|exhausted|failed/.test(s)?"b-err":
-    s==="running"?"b-run":s==="queued"||s==="pending"?"b-queue":"";
+  const c=s==="done"?"b-done":/error|exhausted|failed/.test(s)?"b-err":s==="running"?"b-run":(s==="queued"||s==="pending")?"b-queue":"";
   return `<span class="badge ${c}">${esc(s)}</span>`}
+function fdate(s){return esc((s||"").replace("T"," ").slice(0,16))}
+function colorClass(pct){return pct>=90?"r":pct>=70?"a":"g"}
 
 /* ---------- auth ---------- */
-function showLogin(){el("app").classList.add("hidden");el("login").classList.remove("hidden")}
-function showApp(){el("login").classList.add("hidden");el("app").classList.remove("hidden");renderTabs();go("dashboard")}
+let ME=null;
+function showLogin(){clearTimers();el("shell").classList.add("hidden");el("login").classList.remove("hidden")}
+function showApp(){el("login").classList.add("hidden");el("shell").classList.remove("hidden");renderNav();go("dashboard")}
 async function doLogin(){
   el("loginerr").classList.add("hidden");
-  try{ await api("/login",{method:"POST",body:JSON.stringify({password:el("pw").value})});
-    el("pw").value=""; showApp();
-  }catch(e){ el("loginerr").textContent="Invalid password."; el("loginerr").classList.remove("hidden"); }
+  try{ const r=await api("/login",{method:"POST",body:JSON.stringify({email:el("lemail").value.trim(),password:el("lpw").value})});
+    ME=r.user; el("lpw").value=""; showApp();
+  }catch(e){ el("loginerr").textContent="Invalid email or password."; el("loginerr").classList.remove("hidden"); }
 }
-async function doLogout(){ try{await api("/logout",{method:"POST"})}catch(e){} showLogin() }
+async function doLogout(){ try{await api("/logout",{method:"POST"})}catch(e){} ME=null; showLogin() }
 
-/* ---------- tabs ---------- */
-const TABS=[["dashboard","Dashboard"],["scorecard","Scorecard"],["summary","Summary"],
-  ["models","Models"],["keys","API Keys"],["webhooks","Webhooks"]];
-let cur="dashboard", timer=null;
-function renderTabs(){ el("tabs").innerHTML=TABS.map(([k,l])=>
-  `<div class="tab" data-k="${k}" onclick="go('${k}')">${l}</div>`).join("")+
-  `<span id="qbadge" class="muted" style="margin-left:auto;font-size:12px"></span>` }
-function go(k){ cur=k; clearInterval(timer);
-  document.querySelectorAll("nav .tab").forEach(t=>t.classList.toggle("active",t.dataset.k===k));
-  ({dashboard:viewDashboard,scorecard:viewScorecard,summary:viewSummary,
-    models:viewModels,keys:viewKeys,webhooks:viewWebhooks}[k])(); }
+/* ---------- nav / layout ---------- */
+const NAV2=[
+  ["dashboard","Dashboard","📊"],["recordings","Recordings","🎙️"],["models","Models","🧠"],
+  ["scorecard","Scorecard","✅"],["summary","Summary","📝"],["webhooks","Webhooks","🔔"],
+  ["keys","API Keys","🔑"],["admins","Admins","👥"]
+];
+let cur="dashboard", timers=[];
+function clearTimers(){timers.forEach(t=>clearInterval(t));timers=[]}
+function renderNav(){
+  el("nav").innerHTML=NAV2.map(([k,l,ic])=>`<div class="navitem" data-k="${k}" onclick="go('${k}')"><span class="ic">${ic}</span>${l}</div>`).join("");
+  el("whoami").innerHTML=ME?`<div style="font-weight:600;color:var(--text)">${esc(ME.name||ME.email)}</div><div>${esc(ME.email)}</div>`:"";
+}
+function toggleNav(force){const s=el("side"),sc=el("scrim");const open=force===undefined?!s.classList.contains("open"):force;
+  s.classList.toggle("open",open);sc.classList.toggle("open",open)}
+function go(k){ cur=k; clearTimers(); toggleNav(false); el("detail").innerHTML="";
+  document.querySelectorAll(".navitem").forEach(t=>t.classList.toggle("active",t.dataset.k===k));
+  const t=NAV2.find(n=>n[0]===k); el("ptitle").textContent=t?t[1]:"";
+  ({dashboard:viewDashboard,recordings:viewRecordings,models:viewModels,scorecard:viewScorecard,
+    summary:viewSummary,webhooks:viewWebhooks,keys:viewKeys,admins:viewAdmins}[k])();
+}
 
-/* ---------- dashboard ---------- */
+/* ---------- dashboard: live monitoring ---------- */
+function gauge(id,label,unit){return `<div class="metric">
+  <div class="top"><span class="lbl">${label}</span><span class="chip" id="${id}_chip">—</span></div>
+  <div class="big" id="${id}_big">—</div><div class="sub" id="${id}_sub">${unit||""}</div>
+  <div class="bar" id="${id}_bar"><i></i></div></div>`}
+function setBar(id,pct){const b=el(id+"_bar");if(!b)return;b.className="bar "+colorClass(pct);b.querySelector("i").style.width=Math.min(100,pct)+"%"}
 async function viewDashboard(){
-  el("view").innerHTML=`<div class="card"><h2>Queue</h2><div id="queue" class="muted">loading…</div></div>
-    <div class="card"><div style="display:flex;justify-content:space-between"><h2>Recordings</h2>
-    <button class="ghost sm" onclick="loadTasks()">Refresh</button></div>
-    <div id="tasks">loading…</div></div><div id="detail"></div>`;
-  await refreshDash(); timer=setInterval(refreshDash,4000);
+  el("view").innerHTML=`
+    <div class="grid">
+      ${gauge("gpu","GPU","")}
+      ${gauge("vram","GPU Memory","")}
+      ${gauge("ram","System RAM","")}
+      ${gauge("work","Worker Load","")}
+    </div>
+    <div class="row" style="align-items:stretch">
+      <div style="flex:2;min-width:280px"><div class="card" style="margin:0;height:100%">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h2>Now processing</h2><span id="qcounts" class="muted" style="font-size:12px"></span></div>
+        <div id="processing" class="muted">loading…</div></div></div>
+      <div style="flex:1;min-width:220px"><div class="card" style="margin:0;height:100%">
+        <h2>Loaded models</h2><div id="models_loaded" class="muted">loading…</div>
+        <h2 style="margin-top:16px">API traffic</h2><div id="traffic" class="muted">loading…</div>
+      </div></div>
+    </div>`;
+  await refreshMetrics(); timers.push(setInterval(refreshMetrics,3000));
 }
-async function refreshDash(){ try{await Promise.all([loadQueue(),loadTasks()])}catch(e){} }
-async function loadQueue(){
-  const q=await api("/queue");
-  el("queue").innerHTML=`<span class="stat"><b>${q.counts.queued}</b>queued</span>
-    <span class="stat"><b>${q.counts.running}</b>running</span>
-    <span class="stat"><b>${q.workers}</b>worker</span>`+
-    (q.running.length?`<div class="muted" style="margin-top:8px">▶ ${q.running.map(r=>
-      esc(r.id)+" · "+esc(r.stage||"")+(r.detail?" ("+esc(r.detail)+")":"")).join("<br>")}</div>`:"");
-  if(el("qbadge"))el("qbadge").textContent=`queue: ${q.counts.queued} · running: ${q.counts.running}`;
+async function refreshMetrics(){
+  let m; try{ m=await api("/metrics"); }catch(e){ return; }
+  el("livepill").innerHTML=`<span class="dot-live"></span> live`;
+  // GPU
+  const g=(m.gpu&&m.gpu[0])||null;
+  if(g){ el("gpu_big").textContent=g.util+"%"; el("gpu_sub").textContent=`${esc(g.name)} · ${g.temp}°C`;
+    el("gpu_chip").textContent=g.temp+"°C"; setBar("gpu",g.util);
+    el("vram_big").textContent=(g.mem_used/1024).toFixed(1)+" GB"; el("vram_sub").textContent=`of ${(g.mem_total/1024).toFixed(0)} GB · ${g.mem_pct}%`;
+    el("vram_chip").textContent=g.mem_pct+"%"; setBar("vram",g.mem_pct);
+  } else { el("gpu_big").textContent="n/a"; el("vram_big").textContent="n/a"; }
+  // RAM
+  if(m.ram){ el("ram_big").textContent=m.ram.used_gb+" GB"; el("ram_sub").textContent=`of ${m.ram.total_gb} GB · ${m.ram.avail_gb} GB free`+(m.ram.swap_total_gb?` · swap ${m.ram.swap_used_gb}/${m.ram.swap_total_gb} GB`:"");
+    el("ram_chip").textContent=m.ram.used_pct+"%"; setBar("ram",m.ram.used_pct); }
+  // Workers
+  const w=m.workers||{};
+  el("work_big").innerHTML=`${w.active||0} / ${w.concurrency||0}`;
+  el("work_sub").innerHTML=`${w.queued||0} queued · ${w.done||0} done · ${w.error||0} error`+(w.overloaded?` · <span class="err">overloaded</span>`:"");
+  el("work_chip").textContent=(w.load_pct||0)+"%"; setBar("work",w.load_pct||0);
+  el("qcounts").innerHTML=`${w.queued||0} queued · ${w.running||0} running · ${w.active_stages||0} stages`;
+  // processing list (visuals)
+  const jobs=w.jobs||[];
+  el("processing").innerHTML = jobs.length ? jobs.map(j=>`
+    <div class="proc"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div><span class="spin"></span> <b style="font-size:13px">${esc(j.id)}</b>
+        <span class="muted" style="font-size:12px">· ${esc(j.stage||"working")}</span>
+        ${j.detail?`<span class="muted" style="font-size:12px">(${esc(j.detail)})</span>`:""}</div></div>
+      <div class="pbar" style="margin-top:8px"><i></i></div></div>`).join("")
+    : `<p class="muted" style="margin:6px 0">Idle — no recordings processing right now.</p>`;
+  // loaded models
+  const ml=m.models_loaded||[];
+  el("models_loaded").innerHTML = ml.length ? ml.map(x=>`<div style="display:flex;justify-content:space-between;padding:4px 0"><span>${esc(x.name)}</span><span class="chip">${(x.vram_mb/1024).toFixed(1)} GB</span></div>`).join("")
+    : `<p class="muted" style="margin:4px 0">No LLM resident right now (loads on first job).</p>`;
+  // traffic
+  const t=m.traffic||{};
+  el("traffic").innerHTML=`<div class="stat"><b>${t.rpm||0}</b>req / min</div><div class="stat"><b>${t.rps||0}</b>req / sec</div>`;
+}
+
+/* ---------- recordings ---------- */
+async function viewRecordings(){
+  el("view").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="margin:0">Recordings</h2><button class="ghost sm" onclick="loadTasks()">Refresh</button></div>
+    <div id="tasks" style="margin-top:12px">loading…</div></div>`;
+  await loadTasks(); timers.push(setInterval(loadTasks,4000));
 }
 async function loadTasks(){
-  const ts=await api("/tasks");
-  el("tasks").innerHTML = ts.length? `<table><tr><th>File</th><th>Status</th><th>Stage</th>
-    <th>Summary</th><th>Analytics</th><th>Webhook</th><th>Created</th><th></th></tr>`+
-    ts.map(t=>`<tr>
-      <td>${esc(t.filename)}<div class="muted">${esc(t.task_id)}</div></td>
-      <td>${badge(t.status)}${t.error?`<div class="err" style="font-size:11px">${esc(t.error)}</div>`:""}</td>
-      <td>${esc(t.stage||"—")}</td><td>${badge(t.summary_status)}</td><td>${badge(t.analytics_status)}</td>
-      <td class="muted" style="font-size:11px">${esc(t.callback_result||"—")}</td>
-      <td class="muted" style="font-size:11px">${esc((t.created_at||"").replace("T"," ").slice(0,16))}</td>
-      <td><div class="actions">
-        <button class="sm" onclick="viewTranscriptData('${t.task_id}')">Transcript</button>
-        <button class="sm" style="background:var(--accent2)" onclick="viewSummaryData('${t.task_id}')">Summary</button>
-        <button class="sm" style="background:var(--accent2)" onclick="viewAnalyticsData('${t.task_id}')">Analytics</button>
-        <button class="sm ghost" onclick="viewHistory('${t.task_id}')">History</button>
-        <button class="sm ghost" onclick="viewTask('${t.task_id}')">Raw</button>
-        <button class="sm ghost" onclick="rerun('${t.task_id}','analytics')">Re-analyze</button>
-        <button class="sm ghost" onclick="rerun('${t.task_id}','summary')">Re-summarize</button>
-        <button class="sm warn" onclick="rerun('${t.task_id}','transcribe')">Re-transcribe</button>
-        <button class="sm danger" onclick="del('${t.task_id}')">Delete</button>
-      </div></td></tr>`).join("")+`</table>` : `<p class="muted">No recordings yet.</p>`;
+  let ts; try{ ts=await api("/tasks"); }catch(e){ return; }
+  if(!ts.length){ el("tasks").innerHTML=`<p class="muted">No recordings yet.</p>`; return; }
+  el("tasks").innerHTML=`<div class="tbl-wrap"><table><tr><th>File</th><th>Status</th><th>Summary</th><th>Analytics</th><th>Webhook</th><th>Created</th><th></th></tr>`+
+    ts.map(t=>{
+      const running=t.status==="running";
+      const statusCell=running
+        ? `<div style="display:flex;align-items:center;gap:6px"><span class="spin"></span><span class="b-run" style="font-size:12px;font-weight:600">${esc(t.stage||"processing")}</span></div><div class="pbar" style="margin-top:6px"><i></i></div>`
+        : badge(t.status)+(t.error?`<div class="err" style="font-size:11px">${esc(t.error)}</div>`:"");
+      return `<tr>
+        <td><b>${esc(t.filename||"—")}</b><div class="muted" style="font-size:11px">${esc(t.task_id)}</div></td>
+        <td style="min-width:120px">${statusCell}</td>
+        <td>${badge(t.summary_status)}</td><td>${badge(t.analytics_status)}</td>
+        <td class="muted" style="font-size:11px">${esc(t.callback_result||"—")}</td>
+        <td class="muted" style="font-size:11px">${fdate(t.created_at)}</td>
+        <td><div class="actions">
+          <button class="sm" onclick="viewTranscriptData('${t.task_id}')">Transcript</button>
+          <button class="sm" style="background:var(--accent2)" onclick="viewSummaryData('${t.task_id}')">Summary</button>
+          <button class="sm" style="background:var(--accent2)" onclick="viewAnalyticsData('${t.task_id}')">Analytics</button>
+          <button class="sm ghost" onclick="viewHistory('${t.task_id}')">History</button>
+          <button class="sm ghost" onclick="rerun('${t.task_id}','analytics')">Re-analyze</button>
+          <button class="sm ghost" onclick="rerun('${t.task_id}','summary')">Re-summarize</button>
+          <button class="sm warn" onclick="rerun('${t.task_id}','transcribe')">Re-transcribe</button>
+          <button class="sm danger" onclick="del('${t.task_id}')">Delete</button>
+        </div></td></tr>`;}).join("")+`</table></div>`;
 }
-async function rerun(id,stage){ try{ await api(`/tasks/${id}/rerun?stage=${stage}`,{method:"POST"});
-  toast(`re-run ${stage} queued`); refreshDash(); }catch(e){ toast(e.message,true) } }
+async function rerun(id,stage){ try{ await api(`/tasks/${id}/rerun?stage=${stage}`,{method:"POST"}); toast(`re-run ${stage} queued`); loadTasks(); }catch(e){ toast(e.message,true) } }
 async function del(id){ if(!confirm("Delete this recording and its files?"))return;
-  try{ await api(`/tasks/${id}`,{method:"DELETE"}); toast("deleted"); refreshDash(); }catch(e){ toast(e.message,true) } }
-async function viewTask(id){ const r=await api(`/tasks/${id}`);
-  el("detail").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between">
-    <h2>${esc(id)}</h2><button class="ghost sm" onclick="el('detail').innerHTML=''">Close</button></div>
-    <pre>${esc(JSON.stringify(r,null,2))}</pre></div>`;
-  el("detail").scrollIntoView({behavior:"smooth"}); }
+  try{ await api(`/tasks/${id}`,{method:"DELETE"}); toast("deleted"); loadTasks(); }catch(e){ toast(e.message,true) } }
 
+/* ---------- detail views (transcript / summary / analytics / history) ---------- */
 function _detailShell(title,inner){
-  el("detail").innerHTML=`<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2>${title}</h2><button class="ghost sm" onclick="el('detail').innerHTML=''">Close</button></div>
-    ${inner}</div>`;
+  el("detail").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="margin:0">${title}</h2><button class="ghost sm" onclick="el('detail').innerHTML=''">Close</button></div>
+    <div style="margin-top:12px">${inner}</div></div>`;
   el("detail").scrollIntoView({behavior:"smooth"});
 }
 function _list(a){ return (a&&a.length)? "<ul style='margin:4px 0'>"+a.map(x=>`<li>${esc(x)}</li>`).join("")+"</ul>" : '<span class="muted">—</span>'; }
-
-async function viewSummaryData(id){
-  let r; try{ r=await api(`/tasks/${id}`); }catch(e){ return toast(e.message,true); }
-  const res=r.result||r, s=res.summary||{}, roles=res.roles||{};
-  if(!s.summary){ return _detailShell(`Summary — ${esc(id)}`,
-    `<p class="muted">No summary yet — click <b>Re-summarize</b> and wait for it to finish.</p>`); }
-  const sent = (s.customer_sentiment && typeof s.customer_sentiment==="object")
-    ? esc(JSON.stringify(s.customer_sentiment)) : esc(s.customer_sentiment);
-  _detailShell(`Summary — ${esc(res.filename||id)}`, `
-    <div class="row" style="margin-bottom:12px">
-      <div><label>Outcome</label><div>${esc(s.outcome)||"—"}</div></div>
-      <div><label>Agent</label><div>${esc(roles.agent)||"—"}</div></div>
-      <div><label>Customer</label><div>${esc(roles.customer)||"—"}</div></div>
-      <div><label>Customer sentiment</label><div>${sent||"—"}</div></div>
-      <div><label>Agent tone</label><div>${esc(s.agent_tone)||"—"}</div></div>
-    </div>
-    <label>Summary</label><p style="margin-top:4px">${esc(s.summary)}</p>
-    <label style="margin-top:10px">Key points</label>${_list(s.key_points)}
-    <label style="margin-top:10px">Action items</label>${_list(s.action_items)}`);
-}
-
-async function viewAnalyticsData(id){
-  let r; try{ r=await api(`/tasks/${id}`); }catch(e){ return toast(e.message,true); }
-  const res=r.result||r, a=res.analytics||{};
-  if(!a.scorecard){ return _detailShell(`QA Analytics — ${esc(id)}`,
-    `<p class="muted">No analytics yet — click <b>Re-analyze</b> and wait for it to finish.</p>`); }
-  const byCat={};
-  (a.scorecard||[]).forEach(x=>{ const c=x.category||"General"; (byCat[c]=byCat[c]||[]).push(x); });
-  const cats=Object.entries(byCat).map(([cat,rows])=>`<div class="cat">
-    <div class="chead"><b>${esc(cat)}</b></div>
-    ${rows.map(x=>{ const v=(x.verdict||"").toString();
-      const vc=/not met|fail|no/i.test(v)?"b-err":/met|pass|yes/i.test(v)?"b-done":"";
-      return `<div style="padding:8px 0;border-top:1px solid var(--line)">
-        <div style="display:flex;justify-content:space-between;gap:8px">
-          <b>${esc(x.checkpoint)}</b>
-          <span class="badge ${vc}">${esc(v)}${x.score!=null?" · "+esc(x.score):""}</span></div>
-        ${x.evidence?`<div class="muted" style="font-size:12px;margin-top:3px">“${esc(x.evidence)}”</div>`:""}
-        ${x.suggestion?`<div style="font-size:12px;margin-top:3px">💡 ${esc(x.suggestion)}</div>`:""}
-      </div>`; }).join("")}</div>`).join("");
-  _detailShell(`QA Analytics — ${esc(res.filename||id)}`, `
-    <div style="margin-bottom:12px">
-      <span class="stat"><b>${a.overall_score!=null?esc(a.overall_score)+"/100":"—"}</b>overall score</span>
-      ${a.compliance_fail?'<span class="badge b-err">compliance fail</span>':""}</div>
-    ${cats}`);
-}
-
 const _PALETTE=["#5b8cff","#3ecf8e","#f0b429","#ff6b6b","#a78bfa","#22d3ee"];
-function _fmtT(s){s=Math.max(0,Math.floor(s||0));const m=Math.floor(s/60),ss=s%60;
-  return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss;}
-function _seek(t){const a=document.getElementById("adm-audio"); if(a){ try{ a.currentTime=t; a.play(); }catch(e){} }}
+function _fmtT(s){s=Math.max(0,Math.floor(s||0));const m=Math.floor(s/60),ss=s%60;return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss;}
+function _seek(t){const a=el("adm-audio"); if(a){ try{ a.currentTime=t; a.play(); }catch(e){} }}
 function _syncTranscript(){
-  const a=document.getElementById("adm-audio"), cont=document.getElementById("adm-turns");
-  if(!a||!cont) return;
-  const rows=[...cont.querySelectorAll(".adm-turn")];
-  let active=null, hl="var(--panel2)";
-  a.addEventListener("timeupdate",()=>{
-    const t=a.currentTime;
-    let cur=null;
-    for(const el of rows){ if(t>=parseFloat(el.dataset.s) && t<parseFloat(el.dataset.e)){ cur=el; break; } }
-    if(cur===active) return;
-    if(active) active.style.background="";
-    if(cur){ cur.style.background=hl; cont.scrollTop = cur.offsetTop - cont.clientHeight/2 + cur.clientHeight/2; }
-    active=cur;
-  });
+  const a=el("adm-audio"), cont=el("adm-turns"); if(!a||!cont) return;
+  const rows=[...cont.querySelectorAll(".adm-turn")]; let active=null;
+  a.addEventListener("timeupdate",()=>{ const t=a.currentTime; let c=null;
+    for(const e of rows){ if(t>=parseFloat(e.dataset.s)&&t<parseFloat(e.dataset.e)){ c=e; break; } }
+    if(c===active) return; if(active) active.style.background="";
+    if(c){ c.style.background="color-mix(in srgb,var(--accent) 16%,transparent)"; cont.scrollTop=c.offsetTop-cont.clientHeight/2+c.clientHeight/2; }
+    active=c; });
 }
 async function viewTranscriptData(id){
   let r; try{ r=await api(`/tasks/${id}`);}catch(e){ return toast(e.message,true); }
   const res=r.result||r, roles=res.roles||{};
-  // /admin/api/tasks returns turns under "speaker_wise" and stats under "speakers".
-  const turns=res.speaker_wise||res.turns||[];
-  const per=res.speakers||(res.stats||{}).per_speaker||{};
+  const turns=res.speaker_wise||res.turns||[]; const per=res.speakers||(res.stats||{}).per_speaker||{};
   if(!turns.length){ return _detailShell(`Transcript — ${esc(id)}`,
-    (res.status && res.status!=="done")
-      ? `<p class="muted">Transcription is still ${esc(res.status)} — try again once it's done.</p>`
-      : `<p class="muted">No speech detected in this recording.</p>`); }
-  const cmap={};
-  const colorFor=s=>{ if(!(s in cmap)) cmap[s]=_PALETTE[Object.keys(cmap).length%_PALETTE.length]; return cmap[s]; };
+    (res.status&&res.status!=="done")?`<p class="muted">Transcription is still ${esc(res.status)} — try again once it's done.</p>`:`<p class="muted">No speech detected.</p>`); }
+  const cmap={}; const colorFor=s=>{ if(!(s in cmap)) cmap[s]=_PALETTE[Object.keys(cmap).length%_PALETTE.length]; return cmap[s]; };
   const roleOf=s=>{ if(roles.agent===s&&/^agent$/i.test(s))return""; if(roles.customer===s&&/^customer$/i.test(s))return"";
     if(roles.agent===s)return" (Agent)"; if(roles.customer===s)return" (Customer)"; return""; };
   const bars=Object.entries(per).map(([s,v])=>{const c=colorFor(s);
     return `<span class="badge" style="border-color:${c};color:${c};margin-right:6px">${esc(s)}${esc(roleOf(s))} · ${v.talk_share_pct}%</span>`;}).join("");
   const rows=turns.map(t=>{const c=colorFor(t.speaker);
     const tr=t.text_translated?`<div class="muted" style="font-size:12px;margin-top:2px">↳ ${esc(t.text_translated)}</div>`:"";
-    return `<div class="adm-turn" data-s="${t.start}" data-e="${t.end}" style="display:flex;gap:10px;padding:6px 8px;border-top:1px solid var(--line);border-radius:6px;transition:background .15s">
+    return `<div class="adm-turn" data-s="${t.start}" data-e="${t.end}">
       <span class="muted" title="Play from here" style="font-size:11px;min-width:82px;font-variant-numeric:tabular-nums;cursor:pointer" onclick="_seek(${t.start})">▶ ${_fmtT(t.start)}–${_fmtT(t.end)}</span>
       <span class="badge" style="background:${c}22;color:${c};border-color:${c};min-width:96px;text-align:center">${esc(t.speaker)}${esc(roleOf(t.speaker))}</span>
       <span style="flex:1">${esc(t.text)}${tr}</span></div>`;}).join("");
   _detailShell(`Transcript — ${esc(res.filename||id)}`, `
-    <audio id="adm-audio" controls preload="none" src="/api/jobs/${esc(id)}/audio" style="width:100%;margin:4px 0 12px"></audio>
-    <div style="margin-bottom:10px">${bars}<span class="muted" style="font-size:12px">${turns.length} turns ·
-      ${Object.keys(cmap).length} speakers · lang ${esc(res.language||"?")}${res.translated_to?" → "+esc(res.translated_to):""}</span>
-      <span class="muted" style="font-size:11px"> · plays &amp; auto-scrolls with the audio; click a ▶ to jump</span></div>
+    <audio id="adm-audio" controls preload="none" src="/api/jobs/${esc(id)}/audio" style="width:100%;margin:0 0 12px"></audio>
+    <div style="margin-bottom:10px">${bars}<span class="muted" style="font-size:12px">${turns.length} turns · ${Object.keys(cmap).length} speakers · lang ${esc(res.language||"?")}${res.translated_to?" → "+esc(res.translated_to):""} · plays &amp; auto-scrolls; click ▶ to jump</span></div>
     <div id="adm-turns" style="position:relative;max-height:58vh;overflow:auto">${rows}</div>`);
   _syncTranscript();
 }
-
-/* ---------- history / versions ---------- */
+async function viewSummaryData(id){
+  let r; try{ r=await api(`/tasks/${id}`); }catch(e){ return toast(e.message,true); }
+  const res=r.result||r, s=res.summary||{}, roles=res.roles||{};
+  if(!s.summary){ return _detailShell(`Summary — ${esc(id)}`,`<p class="muted">No summary yet — click <b>Re-summarize</b> and wait.</p>`); }
+  const sent=(s.customer_sentiment&&typeof s.customer_sentiment==="object")?esc(JSON.stringify(s.customer_sentiment)):esc(s.customer_sentiment);
+  _detailShell(`Summary — ${esc(res.filename||id)}`, `
+    <div class="row" style="margin-bottom:12px">
+      <div><label>Outcome</label><div>${esc(s.outcome)||"—"}</div></div>
+      <div><label>Agent</label><div>${esc(roles.agent)||"—"}</div></div>
+      <div><label>Customer</label><div>${esc(roles.customer)||"—"}</div></div>
+      <div><label>Sentiment</label><div>${sent||"—"}</div></div>
+      <div><label>Agent tone</label><div>${esc(s.agent_tone)||"—"}</div></div></div>
+    <label>Summary</label><p style="margin-top:4px">${esc(s.summary)}</p>
+    <label style="margin-top:10px">Key points</label>${_list(s.key_points)}
+    <label style="margin-top:10px">Action items</label>${_list(s.action_items)}`);
+}
+async function viewAnalyticsData(id){
+  let r; try{ r=await api(`/tasks/${id}`); }catch(e){ return toast(e.message,true); }
+  const res=r.result||r, a=res.analytics||{};
+  if(!a.scorecard){ return _detailShell(`QA Analytics — ${esc(id)}`,`<p class="muted">No analytics yet — click <b>Re-analyze</b> and wait.</p>`); }
+  const byCat={}; (a.scorecard||[]).forEach(x=>{ const c=x.category||"General"; (byCat[c]=byCat[c]||[]).push(x); });
+  const cats=Object.entries(byCat).map(([cat,rows])=>`<div class="cat"><div class="chead"><b>${esc(cat)}</b></div>
+    ${rows.map(x=>{ const v=(x.verdict||"").toString(); const vc=/not met|fail|no/i.test(v)?"b-err":/met|pass|yes/i.test(v)?"b-done":"";
+      return `<div style="padding:8px 0;border-top:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(x.checkpoint)}</b>
+          <span class="badge ${vc}">${esc(v)}${x.score!=null?" · "+esc(x.score):""}</span></div>
+        ${x.evidence?`<div class="muted" style="font-size:12px;margin-top:3px">“${esc(x.evidence)}”</div>`:""}
+        ${x.suggestion?`<div style="font-size:12px;margin-top:3px">💡 ${esc(x.suggestion)}</div>`:""}</div>`; }).join("")}</div>`).join("");
+  _detailShell(`QA Analytics — ${esc(res.filename||id)}`, `
+    <div style="margin-bottom:12px"><span class="stat"><b>${a.overall_score!=null?esc(a.overall_score)+"/100":"—"}</b>overall</span>
+    ${a.compliance_fail?'<span class="badge b-err">compliance fail</span>':""}</div>${cats}`);
+}
 function _rtBadge(tp){ const c=tp==="analytics"?"b-run":tp==="summary"?"b-done":""; return `<span class="badge ${c}">${esc(tp)}</span>`; }
 async function viewHistory(id){
   let runs; try{ runs=await api(`/tasks/${id}/runs`); }catch(e){ return toast(e.message,true); }
-  if(!runs.length){ return _detailShell(`History — ${esc(id)}`,
-    `<p class="muted">No runs recorded yet. Runs are stored each time a stage completes; re-run a stage to build history.</p>`); }
-  const rows=runs.map(r=>{
-    const p=r.params||{};
-    let metric="";
-    if(r.run_type==="analytics" && r.overall_score!=null) metric=`score ${r.overall_score}/100${r.compliance_fail?" ⚠":""}`;
+  if(!runs.length){ return _detailShell(`History — ${esc(id)}`,`<p class="muted">No runs yet — re-run a stage to build history.</p>`); }
+  const rows=runs.map(r=>{ const p=r.params||{}; let metric="";
+    if(r.run_type==="analytics"&&r.overall_score!=null) metric=`score ${r.overall_score}/100${r.compliance_fail?" ⚠":""}`;
     else if(r.run_type==="transcribe") metric=`${r.turn_count||0} turns`;
-    else if(r.run_type==="summary" && r.outcome) metric=esc(r.outcome);
+    else if(r.run_type==="summary"&&r.outcome) metric=esc(r.outcome);
     const pstr=Object.entries(p).filter(([k,v])=>v!=null&&v!=="").map(([k,v])=>`${esc(k)}=${esc(v)}`).join(" · ");
     return `<div style="padding:9px 0;border-top:1px solid var(--line)">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        ${_rtBadge(r.run_type)}
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${_rtBadge(r.run_type)}
         <span class="muted" style="font-size:11px">${esc((r.created_at||"").replace("T"," ").slice(0,19))}</span>
-        <b style="font-size:13px">${metric}</b>
-        <span class="muted" style="font-size:11px">${r.processing_seconds!=null?r.processing_seconds+"s":""}</span>
-        <button class="sm ghost" style="margin-left:auto" onclick="viewRun('${r.run_id}')">View output</button>
-      </div>
-      ${pstr?`<div class="muted" style="font-size:11px;margin-top:3px">${pstr}</div>`:""}
-    </div>`;}).join("");
-  _detailShell(`History — ${esc(id)} · ${runs.length} runs`,
-    `<p class="muted" style="font-size:12px;margin:0 0 6px">Every stage execution, newest first — with the exact parameters used. Click “View output” to see that version.</p>${rows}`);
+        <b style="font-size:13px">${metric}</b><span class="muted" style="font-size:11px">${r.processing_seconds!=null?r.processing_seconds+"s":""}</span>
+        <button class="sm ghost" style="margin-left:auto" onclick="viewRun('${r.run_id}')">View output</button></div>
+      ${pstr?`<div class="muted" style="font-size:11px;margin-top:3px">${pstr}</div>`:""}</div>`;}).join("");
+  _detailShell(`History — ${esc(id)} · ${runs.length} runs`,`<p class="muted" style="font-size:12px;margin:0 0 6px">Every stage execution, newest first, with the exact parameters used.</p>${rows}`);
 }
 async function viewRun(runId){
   let r; try{ r=await api(`/runs/${runId}`); }catch(e){ return toast(e.message,true); }
-  const res=r.result||{}, roles=res.roles||{}, cmap={};
-  const colorFor=s=>{ if(!(s in cmap)) cmap[s]=_PALETTE[Object.keys(cmap).length%_PALETTE.length]; return cmap[s]; };
+  const res=r.result||{}, cmap={}; const colorFor=s=>{ if(!(s in cmap)) cmap[s]=_PALETTE[Object.keys(cmap).length%_PALETTE.length]; return cmap[s]; };
   let body="";
-  if(r.run_type==="transcribe"){
-    const turns=res.turns||[];
+  if(r.run_type==="transcribe"){ const turns=res.turns||[];
     body=`<div style="max-height:56vh;overflow:auto">`+turns.map(t=>{const c=colorFor(t.speaker);
-      return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line)">
-        <span class="muted" style="font-size:11px;min-width:76px">${_fmtT(t.start)}–${_fmtT(t.end)}</span>
+      return `<div class="adm-turn"><span class="muted" style="font-size:11px;min-width:76px">${_fmtT(t.start)}–${_fmtT(t.end)}</span>
         <span class="badge" style="background:${c}22;color:${c};border-color:${c};min-width:90px;text-align:center">${esc(t.speaker)}</span>
         <span style="flex:1">${esc(t.text)}</span></div>`;}).join("")+`</div>`;
-  } else if(r.run_type==="summary"){
-    const s=res.summary||{};
-    body=`<label>Summary</label><p>${esc(s.summary||"—")}</p>
-      <label>Outcome</label><div>${esc(s.outcome||"—")}</div>
-      <label style="margin-top:8px">Key points</label>${_list(s.key_points)}
-      <label style="margin-top:8px">Action items</label>${_list(s.action_items)}`;
-  } else if(r.run_type==="analytics"){
-    const a=res.analytics||{};
+  } else if(r.run_type==="summary"){ const s=res.summary||{};
+    body=`<label>Summary</label><p>${esc(s.summary||"—")}</p><label>Outcome</label><div>${esc(s.outcome||"—")}</div>
+      <label style="margin-top:8px">Key points</label>${_list(s.key_points)}<label style="margin-top:8px">Action items</label>${_list(s.action_items)}`;
+  } else if(r.run_type==="analytics"){ const a=res.analytics||{};
     body=`<div><b>${a.overall_score!=null?a.overall_score+"/100":"—"}</b>${a.compliance_fail?' <span class="badge b-err">compliance fail</span>':""}</div>
       <div style="max-height:52vh;overflow:auto;margin-top:8px">`+(a.scorecard||[]).map(x=>`<div style="padding:6px 0;border-top:1px solid var(--line)">
-        <b>${esc(x.checkpoint)}</b> — ${esc(x.verdict)} (${esc(x.score)})
-        ${x.evidence?`<div class="muted" style="font-size:12px">“${esc(x.evidence)}”</div>`:""}</div>`).join("")+`</div>`;
+        <b>${esc(x.checkpoint)}</b> — ${esc(x.verdict)} (${esc(x.score)})${x.evidence?`<div class="muted" style="font-size:12px">“${esc(x.evidence)}”</div>`:""}</div>`).join("")+`</div>`;
   }
   const p=r.params||{}; const pstr=Object.entries(p).map(([k,v])=>`${esc(k)}=${esc(v)}`).join(" · ");
-  _detailShell(`${esc(r.run_type)} run · ${esc((r.created_at||"").replace("T"," ").slice(0,19))}`,
-    `<div class="muted" style="font-size:11px;margin-bottom:10px">params: ${pstr||"—"}</div>${body}`);
+  _detailShell(`${esc(r.run_type)} run · ${esc((r.created_at||"").replace("T"," ").slice(0,19))}`,`<div class="muted" style="font-size:11px;margin-bottom:10px">params: ${pstr||"—"}</div>${body}`);
 }
-
-/* ---------- scorecard ---------- */
-let SC=[];
-async function viewScorecard(){ const r=await api("/settings/scorecard"); SC=r.scorecard; window.SC_DEFAULT=r.default; renderSC(); }
-function renderSC(){
-  el("view").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between">
-    <h2>QA Scorecard</h2><div class="actions">
-      <button class="ghost sm" onclick="SC=structuredClone(window.SC_DEFAULT);renderSC()">Reset to default</button>
-      <button class="ghost sm" onclick="SC.push({category:'New Category',weight:1,checkpoints:[{name:'New checkpoint',weight:1}]});renderSC()">+ Category</button>
-      <button class="sm" onclick="saveSC()">Save</button></div></div>
-    <p class="muted">Weights scale each item's contribution to the 0–100 score. A category named exactly “Compliance” with a “Not Met” caps the score at 50.</p>
-    <div id="scbody"></div></div>`;
-  el("scbody").innerHTML=SC.map((c,ci)=>`<div class="cat">
-    <div class="chead"><input value="${esc(c.category)}" onchange="SC[${ci}].category=this.value">
-      <label style="margin:0">weight</label><input class="w" type="number" step="0.1" value="${c.weight??1}" onchange="SC[${ci}].weight=parseFloat(this.value)||1">
-      <button class="sm danger" onclick="SC.splice(${ci},1);renderSC()">✕</button></div>
-    ${c.checkpoints.map((cp,pi)=>`<div class="kv">
-      <input value="${esc(cp.name)}" onchange="SC[${ci}].checkpoints[${pi}].name=this.value">
-      <input class="w" type="number" step="0.1" value="${cp.weight??1}" onchange="SC[${ci}].checkpoints[${pi}].weight=parseFloat(this.value)||1">
-      <button class="sm ghost" onclick="SC[${ci}].checkpoints.splice(${pi},1);renderSC()">✕</button></div>`).join("")}
-    <button class="sm ghost" onclick="SC[${ci}].checkpoints.push({name:'New checkpoint',weight:1});renderSC()">+ checkpoint</button>
-  </div>`).join("");
-}
-async function saveSC(){ try{ await api("/settings/scorecard",{method:"PUT",body:JSON.stringify({scorecard:SC})});
-  toast("scorecard saved"); }catch(e){ toast(e.message,true) } }
-
-/* ---------- summary ---------- */
-async function viewSummary(){ const r=await api("/settings/summary"); const s=r.summary;
-  el("view").innerHTML=`<div class="card"><h2>Summary fields</h2>
-    <label>Outcome options (comma-separated)</label>
-    <input id="s_out" value="${esc((s.outcome_options||[]).join(', '))}">
-    <label style="margin-top:12px"><input type="checkbox" id="s_sent" ${s.sentiment?"checked":""} style="width:auto"> Extract customer sentiment</label>
-    <h2 style="margin-top:16px">Custom fields</h2><div id="cf"></div>
-    <button class="ghost sm" onclick="CF.push({key:'',prompt:''});renderCF()">+ field</button>
-    <div><button style="margin-top:14px" onclick="saveSummary()">Save</button></div></div>`;
-  window.CF=s.custom_fields||[]; renderCF();
-}
-function renderCF(){ el("cf").innerHTML=CF.map((f,i)=>`<div class="kv">
-  <input placeholder="key" value="${esc(f.key)}" onchange="CF[${i}].key=this.value">
-  <input placeholder="what to extract" value="${esc(f.prompt)}" onchange="CF[${i}].prompt=this.value">
-  <button class="sm ghost" onclick="CF.splice(${i},1);renderCF()">✕</button></div>`).join("") }
-async function saveSummary(){ const body={summary:{
-    outcome_options:el("s_out").value.split(",").map(x=>x.trim()).filter(Boolean),
-    sentiment:el("s_sent").checked, custom_fields:CF.filter(f=>f.key.trim())}};
-  try{ await api("/settings/summary",{method:"PUT",body:JSON.stringify(body)}); toast("summary config saved"); }
-  catch(e){ toast(e.message,true) } }
 
 /* ---------- models ---------- */
-function _opt(val,cur,label){ return `<option value="${esc(val)}" ${val===cur?"selected":""}>${esc(label||val)}</option>`; }
-function _sel(id,cur,opts){ return `<select id="${id}">${opts.map(o=>_opt(o.v,cur,o.l)).join("")}</select>`; }
-function _ollamaSel(id,cur,list){
-  const items=(list||[]).slice(); if(cur && !items.includes(cur)) items.unshift(cur);
-  const opts=items.map(x=>({v:x,l:x}));
-  return _sel(id,cur,opts) + ((list&&list.length)?"":`<div class="muted" style="font-size:11px;margin-top:3px">No models found on the LLM server (${esc(id)}).</div>`);
-}
+function _opt(v,c,l){ return `<option value="${esc(v)}" ${v===c?"selected":""}>${esc(l||v)}</option>`; }
+function _sel(id,c,opts){ return `<select id="${id}">${opts.map(o=>_opt(o.v,c,o.l)).join("")}</select>`; }
+function _ollamaSel(id,c,list){ const items=(list||[]).slice(); if(c&&!items.includes(c)) items.unshift(c);
+  return _sel(id,c,items.map(x=>({v:x,l:x})))+((list&&list.length)?"":`<div class="muted" style="font-size:11px;margin-top:3px">No models found on the LLM server.</div>`); }
 async function viewModels(){
   const r=await api("/settings/models"); const m=r.current||{}, av=r.available||{};
   const whisperOpts=(av.whisper||[]).map(o=>({v:o.id,l:o.id+" — "+o.speed}));
-  if(m.transcribe_model && !whisperOpts.some(o=>o.v===m.transcribe_model)) whisperOpts.unshift({v:m.transcribe_model,l:m.transcribe_model+" (custom)"});
+  if(m.transcribe_model&&!whisperOpts.some(o=>o.v===m.transcribe_model)) whisperOpts.unshift({v:m.transcribe_model,l:m.transcribe_model+" (custom)"});
   const backendOpts=(av.backends||["cuda","faster","mlx"]).map(b=>({v:b,l:b}));
   const modeOpts=(av.speaker_modes||[]).map(o=>({v:o.id,l:o.id+" — "+o.desc}));
   el("view").innerHTML=`<div class="card"><h2>Models per process</h2>
@@ -393,40 +414,55 @@ async function viewModels(){
       <div><label>Backend</label>${_sel("m_be",m.asr_backend,backendOpts)}</div></div></div>
     <div class="cat"><div class="chead"><b>2 · Diarization</b></div>
       <div class="row"><div><label>Method</label>${_sel("m_sm",m.speaker_mode,modeOpts)}</div>
-      <div><label>LLM model (used by llm / hybrid)</label>${_ollamaSel("m_dm",m.diarize_model,av.ollama)}</div></div></div>
-    <div class="cat"><div class="chead"><b>3 · Summary</b></div>
-      <div><label>LLM model</label>${_ollamaSel("m_su",m.summary_model,av.ollama)}</div></div>
-    <div class="cat"><div class="chead"><b>4 · QA Analytics</b></div>
-      <div><label>LLM model</label>${_ollamaSel("m_an",m.analytics_model,av.ollama)}</div></div>
+      <div><label>LLM model (llm / hybrid)</label>${_ollamaSel("m_dm",m.diarize_model,av.ollama)}</div></div></div>
+    <div class="cat"><div class="chead"><b>3 · Summary</b></div><div><label>LLM model</label>${_ollamaSel("m_su",m.summary_model,av.ollama)}</div></div>
+    <div class="cat"><div class="chead"><b>4 · QA Analytics</b></div><div><label>LLM model</label>${_ollamaSel("m_an",m.analytics_model,av.ollama)}</div></div>
     <div><label>Default translate-to language (blank = none)</label><input id="m_tl" value="${esc(m.target_language)}"></div>
     <button style="margin-top:12px" onclick="saveModels()">Save</button></div>`;
 }
-async function saveModels(){
-  const body={transcribe_model:el("m_tw").value, asr_backend:el("m_be").value, speaker_mode:el("m_sm").value,
-    diarize_model:el("m_dm").value, summary_model:el("m_su").value, analytics_model:el("m_an").value,
-    target_language:el("m_tl").value};
-  try{ await api("/settings/models",{method:"PUT",body:JSON.stringify(body)}); toast("models saved"); }
-  catch(e){ toast(e.message,true) } }
+async function saveModels(){ const body={transcribe_model:el("m_tw").value,asr_backend:el("m_be").value,speaker_mode:el("m_sm").value,
+    diarize_model:el("m_dm").value,summary_model:el("m_su").value,analytics_model:el("m_an").value,target_language:el("m_tl").value};
+  try{ await api("/settings/models",{method:"PUT",body:JSON.stringify(body)}); toast("models saved"); }catch(e){ toast(e.message,true) } }
 
-/* ---------- api keys ---------- */
-async function viewKeys(){ const ks=await api("/keys");
-  el("view").innerHTML=`<div class="card"><h2>API keys (X-API-Key)</h2>
-    <div class="row"><div><input id="k_label" placeholder="label (e.g. partner-x)"></div>
-    <div style="flex:none"><button onclick="createKey()">Create key</button></div></div>
-    <div id="newkey"></div>
-    <table style="margin-top:12px"><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Status</th><th></th></tr>
-    ${ks.map(k=>`<tr><td>${esc(k.label)}</td><td class="muted">${esc(k.prefix)}…</td>
-      <td class="muted" style="font-size:11px">${esc((k.created_at||"").replace("T"," ").slice(0,16))}</td>
-      <td>${k.revoked_at?'<span class="badge b-err">revoked</span>':'<span class="badge b-done">active</span>'}</td>
-      <td>${k.revoked_at?"":`<button class="sm danger" onclick="revokeKey('${k.id}')">Revoke</button>`}</td></tr>`).join("")}
-    </table></div>`;
+/* ---------- scorecard ---------- */
+let SC=[];
+async function viewScorecard(){ const r=await api("/settings/scorecard"); SC=r.scorecard; window.SC_DEFAULT=r.default; renderSC(); }
+function renderSC(){
+  el("view").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">QA Scorecard</h2><div class="actions">
+      <button class="ghost sm" onclick="SC=structuredClone(window.SC_DEFAULT);renderSC()">Reset to default</button>
+      <button class="ghost sm" onclick="SC.push({category:'New Category',weight:1,checkpoints:[{name:'New checkpoint',weight:1}]});renderSC()">+ Category</button>
+      <button class="sm" onclick="saveSC()">Save</button></div></div>
+    <p class="muted" style="font-size:12px">Weights scale each item's contribution to the 0–100 score. A category named exactly “Compliance” with a “Not Met” caps the score at 50.</p>
+    <div id="scbody" style="margin-top:10px"></div></div>`;
+  el("scbody").innerHTML=SC.map((c,ci)=>`<div class="cat">
+    <div class="chead"><input value="${esc(c.category)}" onchange="SC[${ci}].category=this.value">
+      <label style="margin:0">weight</label><input class="w" type="number" step="0.1" value="${c.weight??1}" onchange="SC[${ci}].weight=parseFloat(this.value)||1">
+      <button class="sm danger" onclick="SC.splice(${ci},1);renderSC()">✕</button></div>
+    ${c.checkpoints.map((cp,pi)=>`<div class="kv"><input value="${esc(cp.name)}" onchange="SC[${ci}].checkpoints[${pi}].name=this.value">
+      <input class="w" type="number" step="0.1" value="${cp.weight??1}" onchange="SC[${ci}].checkpoints[${pi}].weight=parseFloat(this.value)||1">
+      <button class="sm ghost" onclick="SC[${ci}].checkpoints.splice(${pi},1);renderSC()">✕</button></div>`).join("")}
+    <button class="sm ghost" onclick="SC[${ci}].checkpoints.push({name:'New checkpoint',weight:1});renderSC()">+ checkpoint</button></div>`).join("");
 }
-async function createKey(){ try{ const r=await api("/keys",{method:"POST",body:JSON.stringify({label:el("k_label").value})});
-  el("newkey").innerHTML=`<div class="card" style="border-color:var(--accent2)"><b>Copy this key now — it won't be shown again:</b>
-    <pre>${esc(r.key)}</pre></div>`; viewKeysRefreshLater(); }catch(e){ toast(e.message,true) } }
-function viewKeysRefreshLater(){ /* keep the shown key; user can switch tabs to refresh list */ }
-async function revokeKey(id){ if(!confirm("Revoke this key?"))return;
-  try{ await api(`/keys/${id}`,{method:"DELETE"}); toast("revoked"); viewKeys(); }catch(e){ toast(e.message,true) } }
+async function saveSC(){ try{ await api("/settings/scorecard",{method:"PUT",body:JSON.stringify({scorecard:SC})}); toast("scorecard saved"); }catch(e){ toast(e.message,true) } }
+
+/* ---------- summary config ---------- */
+async function viewSummary(){ const r=await api("/settings/summary"); const s=r.summary;
+  el("view").innerHTML=`<div class="card"><h2>Summary fields</h2>
+    <label>Outcome options (comma-separated)</label><input id="s_out" value="${esc((s.outcome_options||[]).join(', '))}">
+    <label style="margin-top:12px"><input type="checkbox" id="s_sent" ${s.sentiment?"checked":""} style="width:auto"> Extract customer sentiment</label>
+    <h3 style="margin-top:16px">Custom fields</h3><div id="cf"></div>
+    <button class="ghost sm" onclick="CF.push({key:'',prompt:''});renderCF()">+ field</button>
+    <div><button style="margin-top:14px" onclick="saveSummary()">Save</button></div></div>`;
+  window.CF=s.custom_fields||[]; renderCF();
+}
+function renderCF(){ el("cf").innerHTML=CF.map((f,i)=>`<div class="kv">
+  <input placeholder="key" value="${esc(f.key)}" onchange="CF[${i}].key=this.value">
+  <input placeholder="what to extract" value="${esc(f.prompt)}" onchange="CF[${i}].prompt=this.value">
+  <button class="sm ghost" onclick="CF.splice(${i},1);renderCF()">✕</button></div>`).join("") }
+async function saveSummary(){ const body={summary:{outcome_options:el("s_out").value.split(",").map(x=>x.trim()).filter(Boolean),
+    sentiment:el("s_sent").checked,custom_fields:CF.filter(f=>f.key.trim())}};
+  try{ await api("/settings/summary",{method:"PUT",body:JSON.stringify(body)}); toast("summary config saved"); }catch(e){ toast(e.message,true) } }
 
 /* ---------- webhooks ---------- */
 const WH_EVENTS=["transcribed","summarized","analyzed"];
@@ -438,32 +474,62 @@ async function viewWebhooks(){ const w=await api("/settings/webhook");
     <label style="margin-top:10px">Fire on</label>
     <div>${WH_EVENTS.map(e=>`<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="w_ev" value="${e}" ${(w.events||[]).includes(e)?"checked":""} style="width:auto"> ${e}</label>`).join("")}</div>
     <button style="margin-top:14px" onclick="saveWebhook()">Save</button></div>
-    <div class="card"><div style="display:flex;justify-content:space-between"><h2>Delivery log</h2>
-      <button class="ghost sm" onclick="loadWebLog()">Refresh</button></div><div id="weblog">loading…</div></div>`;
+    <div class="card"><div style="display:flex;justify-content:space-between"><h2 style="margin:0">Delivery log</h2>
+      <button class="ghost sm" onclick="loadWebLog()">Refresh</button></div><div id="weblog" style="margin-top:12px">loading…</div></div>`;
   loadWebLog();
 }
-async function saveWebhook(){ const body={webhook:{enabled:el("w_en").checked,url:el("w_url").value,
-    secret:el("w_sec").value,events:[...document.querySelectorAll(".w_ev:checked")].map(x=>x.value)}};
-  try{ await api("/settings/webhook",{method:"PUT",body:JSON.stringify(body)}); toast("webhook saved"); }
-  catch(e){ toast(e.message,true) } }
+async function saveWebhook(){ const body={webhook:{enabled:el("w_en").checked,url:el("w_url").value,secret:el("w_sec").value,
+    events:[...document.querySelectorAll(".w_ev:checked")].map(x=>x.value)}};
+  try{ await api("/settings/webhook",{method:"PUT",body:JSON.stringify(body)}); toast("webhook saved"); }catch(e){ toast(e.message,true) } }
 async function loadWebLog(){ const evs=await api("/webhooks?limit=100");
-  el("weblog").innerHTML = evs.length? `<table><tr><th>When</th><th>Task</th><th>Event</th><th>Status</th>
-    <th>Att.</th><th>Error</th><th></th></tr>`+evs.map(e=>`<tr>
-    <td class="muted" style="font-size:11px">${esc((e.updated_at||e.created_at||"").replace("T"," ").slice(0,19))}</td>
+  el("weblog").innerHTML=evs.length?`<div class="tbl-wrap"><table><tr><th>When</th><th>Task</th><th>Event</th><th>Status</th><th>Att.</th><th>Error</th><th></th></tr>`+
+    evs.map(e=>`<tr><td class="muted" style="font-size:11px">${esc((e.updated_at||e.created_at||"").replace("T"," ").slice(0,19))}</td>
     <td>${esc(e.task_id)}</td><td>${esc(e.event_type)}</td><td>${badge(e.status)}</td><td>${e.attempts}</td>
     <td class="err" style="font-size:11px">${esc(e.last_error||"")}</td>
-    <td><button class="sm ghost" onclick="refire('${e.id}')">Re-fire</button></td></tr>`).join("")+`</table>`
-    : `<p class="muted">No webhook deliveries yet.</p>`;
+    <td><button class="sm ghost" onclick="refire('${e.id}')">Re-fire</button></td></tr>`).join("")+`</table></div>`
+    :`<p class="muted">No webhook deliveries yet.</p>`;
 }
-async function refire(id){ try{ await api(`/webhooks/${id}/redeliver`,{method:"POST"});
-  toast("re-fire queued"); setTimeout(loadWebLog,800); }catch(e){ toast(e.message,true) } }
+async function refire(id){ try{ await api(`/webhooks/${id}/redeliver`,{method:"POST"}); toast("re-fire queued"); setTimeout(loadWebLog,800); }catch(e){ toast(e.message,true) } }
+
+/* ---------- api keys ---------- */
+async function viewKeys(){ const ks=await api("/keys");
+  el("view").innerHTML=`<div class="card"><h2>API keys (X-API-Key)</h2>
+    <div class="row"><div><input id="k_label" placeholder="label (e.g. partner-x)"></div>
+    <div style="flex:none"><button onclick="createKey()">Create key</button></div></div><div id="newkey"></div>
+    <div class="tbl-wrap"><table style="margin-top:12px"><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Status</th><th></th></tr>
+    ${ks.map(k=>`<tr><td>${esc(k.label)}</td><td class="muted">${esc(k.prefix)}…</td><td class="muted" style="font-size:11px">${fdate(k.created_at)}</td>
+      <td>${k.revoked_at?'<span class="badge b-err">revoked</span>':'<span class="badge b-done">active</span>'}</td>
+      <td>${k.revoked_at?"":`<button class="sm danger" onclick="revokeKey('${k.id}')">Revoke</button>`}</td></tr>`).join("")}</table></div></div>`;
+}
+async function createKey(){ try{ const r=await api("/keys",{method:"POST",body:JSON.stringify({label:el("k_label").value})});
+  el("newkey").innerHTML=`<div class="card" style="border-color:var(--good);margin-top:12px"><b>Copy this key now — it won't be shown again:</b><pre>${esc(r.key)}</pre></div>`; }catch(e){ toast(e.message,true) } }
+async function revokeKey(id){ if(!confirm("Revoke this key?"))return; try{ await api(`/keys/${id}`,{method:"DELETE"}); toast("revoked"); viewKeys(); }catch(e){ toast(e.message,true) } }
+
+/* ---------- admins ---------- */
+async function viewAdmins(){ const list=await api("/admins");
+  el("view").innerHTML=`<div class="card"><h2>Admin users</h2>
+    <p class="muted" style="font-size:12px">Anyone here can sign in with their email + password. The last admin can't be deleted.</p>
+    <div class="row" style="margin-top:8px">
+      <div><label>Name</label><input id="a_name" placeholder="Jane Doe"></div>
+      <div><label>Email</label><input id="a_email" type="email" placeholder="jane@company.com"></div>
+      <div><label>Password</label><input id="a_pw" type="password" placeholder="min 6 chars"></div>
+      <div style="flex:none;display:flex;align-items:flex-end"><button onclick="createAdmin()">Add admin</button></div></div>
+    <div class="tbl-wrap"><table style="margin-top:14px"><tr><th>Name</th><th>Email</th><th>Created</th><th>Last login</th><th></th></tr>
+    ${list.map(a=>`<tr><td><b>${esc(a.name||"—")}</b></td><td>${esc(a.email)}${ME&&ME.email===a.email?' <span class="chip">you</span>':""}</td>
+      <td class="muted" style="font-size:11px">${fdate(a.created_at)}</td>
+      <td class="muted" style="font-size:11px">${a.last_login?fdate(a.last_login):"never"}</td>
+      <td>${ME&&ME.email===a.email?"":`<button class="sm danger" onclick="delAdmin('${a.id}','${esc(a.email)}')">Delete</button>`}</td></tr>`).join("")}</table></div></div>`;
+}
+async function createAdmin(){ try{ await api("/admins",{method:"POST",body:JSON.stringify({name:el("a_name").value,email:el("a_email").value,password:el("a_pw").value})});
+  toast("admin added"); viewAdmins(); }catch(e){ toast(e.message.replace(/^"|"$/g,""),true) } }
+async function delAdmin(id,email){ if(!confirm("Delete admin "+email+"?"))return; try{ await api(`/admins/${id}`,{method:"DELETE"}); toast("deleted"); viewAdmins(); }catch(e){ toast(e.message.replace(/^"|"$/g,""),true) } }
 
 /* ---------- boot ---------- */
 (async function(){
   try{ const s=await fetch(API+"/status").then(r=>r.json());
-    if(!s.configured){ el("loginhint").textContent="No admin password is set. Set ADMIN_PASSWORD in the server .env, then restart."; }
+    if(!s.configured){ el("loginhint").textContent="No admin exists yet. Set ADMIN_EMAIL + ADMIN_PASSWORD in the server .env, then restart to seed the first admin."; }
   }catch(e){}
-  try{ await api("/queue"); showApp(); }   // cookie still valid?
+  try{ ME=await api("/me"); showApp(); }
   catch(e){ showLogin(); }
 })();
 </script>

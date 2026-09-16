@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from . import admin_auth, db, jobs, public, settings, webhooks
+from . import admin_auth, db, jobs, metrics, public, settings, webhooks
 from .settings import K_MODELS, K_SCORECARD, K_SCORECARD_VERSION, K_SUMMARY, K_WEBHOOK
 
 
@@ -24,7 +24,14 @@ _ADMIN = [Depends(admin_auth.require_admin)]
 
 
 class LoginBody(BaseModel):
+    email: str
     password: str
+
+
+class AdminBody(BaseModel):
+    email: str
+    password: str
+    name: str = ""
 
 
 class ModelsBody(BaseModel):
@@ -39,25 +46,61 @@ class ModelsBody(BaseModel):
 
 # ---------------------------------------------------------------- auth
 @router.get("/status", summary="Is admin configured / am I logged in?")
-def status(authorization: str | None = None):
+def status():
     return {"configured": admin_auth.is_configured()}
 
 
-@router.post("/login", summary="Admin login → session token + cookie")
+@router.post("/login", summary="Admin login (email + password) → session token + cookie")
 def login(body: LoginBody, response: Response):
-    token = admin_auth.login(body.password)
-    if not token:
-        raise HTTPException(401, "invalid password")
+    res = admin_auth.login(body.email, body.password)
+    if not res:
+        raise HTTPException(401, "invalid email or password")
     # httponly cookie for the browser UI; token also returned for API clients.
-    response.set_cookie("admin_session", token, httponly=True, samesite="lax", max_age=12 * 3600)
-    return {"token": token}
+    response.set_cookie("admin_session", res["token"], httponly=True, samesite="lax", max_age=12 * 3600)
+    return {"token": res["token"], "user": {"email": res["email"], "name": res["name"]}}
 
 
 @router.post("/logout", dependencies=_ADMIN, summary="Log out (invalidate session)")
-def logout(response: Response, token: str = Depends(admin_auth.require_admin)):
-    admin_auth.logout(token)
+def logout(response: Response, me: dict = Depends(admin_auth.require_admin)):
+    admin_auth.logout(me["token"])
     response.delete_cookie("admin_session")
     return {"ok": True}
+
+
+@router.get("/me", summary="Current logged-in admin")
+def me(me: dict = Depends(admin_auth.require_admin)):
+    return {"email": me["email"], "name": me["name"]}
+
+
+# ---------------------------------------------------------------- admin users
+@router.get("/admins", dependencies=_ADMIN, summary="List admin users")
+def list_admins():
+    return db.list_admin_users()
+
+
+@router.post("/admins", dependencies=_ADMIN, summary="Create an admin user")
+def create_admin(body: AdminBody):
+    try:
+        return admin_auth.create_admin(body.email, body.password, body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/admins/{uid}", summary="Delete an admin (cannot delete the last one or yourself)")
+def delete_admin(uid: str, me: dict = Depends(admin_auth.require_admin)):
+    if uid == me["id"]:
+        raise HTTPException(400, "you cannot delete your own account while logged in")
+    if db.count_admin_users() <= 1:
+        raise HTTPException(400, "cannot delete the last admin")
+    if not db.delete_admin_user(uid):
+        raise HTTPException(404, "admin not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- live metrics
+@router.get("/metrics", dependencies=_ADMIN, summary="Live system metrics (GPU/RAM/models/traffic/workers)")
+def live_metrics():
+    return metrics.snapshot()
 
 
 # ---------------------------------------------------------------- config: models/backend

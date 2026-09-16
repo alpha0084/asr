@@ -88,6 +88,11 @@ _DDL = [
         recording_id TEXT, category TEXT, checkpoint TEXT, score DOUBLE PRECISION,
         verdict TEXT, evidence TEXT, suggestion TEXT)""",
     "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value JSONB)",
+    # Multiple admins can log in with their own email + password (pbkdf2 hash).
+    """CREATE TABLE IF NOT EXISTS admin_users (
+        id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT,
+        password_hash TEXT NOT NULL, active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT now(), last_login TIMESTAMPTZ)""",
     """CREATE TABLE IF NOT EXISTS api_keys (
         id TEXT PRIMARY KEY, label TEXT, key_hash TEXT, prefix TEXT,
         created_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ)""",
@@ -348,6 +353,54 @@ def set_setting(key: str, value):
     with _conn() as c, c.cursor() as cur:
         cur.execute("INSERT INTO settings(key, value) VALUES(%s, %s) "
                     "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", (key, Json(value)))
+
+
+# ---------------------------------------------------------------- admin users
+def add_admin_user(uid: str, email: str, name: str, password_hash: str, created_at: str):
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("INSERT INTO admin_users(id, email, name, password_hash, active, created_at) "
+                    "VALUES(%s,%s,%s,%s,TRUE,%s)", (uid, email.lower(), name, password_hash, created_at))
+
+
+def get_admin_by_email(email: str) -> dict | None:
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT * FROM admin_users WHERE lower(email)=lower(%s) AND active", (email,))
+        return cur.fetchone()
+
+
+def list_admin_users() -> list:
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT id, email, name, active, created_at, last_login "
+                    "FROM admin_users ORDER BY created_at")
+        rows = cur.fetchall()
+    for r in rows:
+        for tk in ("created_at", "last_login"):
+            if r.get(tk) is not None:
+                r[tk] = r[tk].isoformat()
+    return rows
+
+
+def count_admin_users() -> int:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT count(*) FROM admin_users WHERE active")
+        return cur.fetchone()[0]
+
+
+def set_admin_last_login(uid: str, when: str):
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE admin_users SET last_login=%s WHERE id=%s", (when, uid))
+
+
+def set_admin_password(uid: str, password_hash: str) -> bool:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE admin_users SET password_hash=%s WHERE id=%s", (password_hash, uid))
+        return cur.rowcount > 0
+
+
+def delete_admin_user(uid: str) -> bool:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM admin_users WHERE id=%s", (uid,))
+        return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------- api keys

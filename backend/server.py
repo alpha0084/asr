@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, Uploa
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import APIKeyHeader
 
-from . import admin_api, admin_auth, db, jobs, public, schemas, webhooks
+from . import admin_api, admin_auth, db, jobs, metrics, public, schemas, webhooks
 from .config import API_KEY, DATA_DIR, WHISPER_MODEL
 
 API_DESCRIPTION = """
@@ -97,10 +97,23 @@ _ERRORS = {
 app.include_router(admin_api.router)
 
 
+@app.middleware("http")
+async def _traffic_counter(request, call_next):
+    """Count public/task API + web-submit hits for the dashboard traffic gauge.
+
+    Excludes the admin polling endpoints so the dashboard's own refresh doesn't
+    inflate the reading.
+    """
+    p = request.url.path
+    if (p.startswith("/api/") or p == "/api") and not p.startswith("/admin"):
+        metrics.record_hit()
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def _startup():
     jobs.load_from_db()      # repopulate tasks from SQLite
-    admin_auth.bootstrap()   # seed admin password from ADMIN_PASSWORD on first run
+    admin_auth.bootstrap()   # seed the first admin from ADMIN_EMAIL/ADMIN_PASSWORD on first run
     webhooks.start()         # resume delivering any pending/failed webhook events
 
 
