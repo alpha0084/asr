@@ -1,9 +1,69 @@
 """Stage 4 — merge transcription + diarization into speaker-labeled turns + talk stats."""
+import difflib
+import re
 from collections import defaultdict
 
 
 def _overlap(a0, a1, b0, b1) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _norm_text(s: str) -> str:
+    """Lowercase, keep word chars + Devanagari, collapse whitespace — for comparing
+    two transcript segments regardless of punctuation/spacing."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\wऀ-ॿ]+", " ", (s or "").lower())).strip()
+
+
+def _seg_text(seg: dict) -> str:
+    txt = seg.get("text")
+    if not txt:
+        txt = " ".join((w.get("word") or "") for w in (seg.get("words") or []))
+    return txt
+
+
+_DUP_GAP = 3.0        # seconds — a repeat within this window of a near-identical segment
+_DUP_SIM = 0.85       # text-similarity ratio above which two segments are "the same"
+_DUP_MIN_LEN = 8      # ignore short backchannels ("जी जी", "haan haan")
+
+
+def dedupe_overlapping_segments(segments: list) -> list:
+    """Drop Whisper repetition-hallucination duplicates.
+
+    On low-quality (8kHz mono) audio Whisper sometimes transcribes the same utterance
+    twice — either overlapping or back-to-back with a small gap. Diarization then puts
+    the two copies under different speakers, surfacing as one sentence repeated under
+    both Agent and Customer. We collapse such near-identical, temporally-adjacent
+    segments to a single copy, KEEPING THE LATER one (in practice its timestamp sits in
+    the true speaker's region, so it gets attributed correctly).
+
+    Only long (>= _DUP_MIN_LEN chars), highly-similar (>= _DUP_SIM) segments within
+    _DUP_GAP seconds are collapsed, so genuine short backchannels and well-separated
+    repeats are preserved.
+    """
+    kept: list = []
+    for seg in segments:
+        s0, s1 = seg.get("start"), seg.get("end")
+        txt = _norm_text(_seg_text(seg))
+        dup_idx = None
+        if txt and len(txt) >= _DUP_MIN_LEN and s0 is not None and s1 is not None and s1 > s0:
+            for j in range(len(kept) - 1, max(-1, len(kept) - 4), -1):   # recent neighbours
+                k = kept[j]
+                k0, k1 = k.get("start"), k.get("end")
+                if k0 is None or k1 is None or k1 <= k0:
+                    continue
+                ov = _overlap(s0, s1, k0, k1)
+                gap = 0.0 if ov > 0 else max(s0 - k1, k0 - s1)
+                if gap > _DUP_GAP:                    # too far apart to be a repeat artifact
+                    continue
+                ktxt = _norm_text(_seg_text(k))
+                if (txt in ktxt or ktxt in txt
+                        or difflib.SequenceMatcher(None, txt, ktxt).ratio() >= _DUP_SIM):
+                    dup_idx = j
+                    break
+        if dup_idx is not None:
+            del kept[dup_idx]        # drop the earlier copy; keep this (later) one
+        kept.append(seg)
+    return kept
 
 
 def _speaker_for(t0: float, t1: float, dia_turns: list) -> str | None:
@@ -84,7 +144,7 @@ def assign_speakers(segments: list, dia_turns: list) -> list:
             if text:
                 runs.append(run)
 
-    for seg in segments:
+    for seg in dedupe_overlapping_segments(segments):
         words = [
             w for w in (seg.get("words") or [])
             if w.get("start") is not None and w.get("end") is not None
