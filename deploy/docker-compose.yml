@@ -1,0 +1,86 @@
+# Standalone, self-contained ASR stack — fully isolated from the production/whisper-ui
+# container. Own network, own Postgres, own Ollama, own NAMED volumes (survive
+# `docker compose up --force-recreate` and container rebuilds — this is the fix for
+# the /state wipe). GPU is shared with the host's other GPU users.
+#
+#   cd deploy
+#   cp .env.example .env         # fill in secrets
+#   docker compose up -d --build
+#   docker compose exec ollama ollama pull qwen2.5:7b
+#   docker compose exec ollama ollama pull llama3.2:3b
+#
+# Then point a tunnel/reverse-proxy at 127.0.0.1:5530 (see README for the cloudflared
+# ingress line), or enable the bundled cloudflared service below.
+
+name: asr
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: asr_admin
+      POSTGRES_DB: asr
+      POSTGRES_HOST_AUTH_METHOD: trust   # loopback-only within the asr network
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [asr]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asr_admin -d asr"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama:/root/.ollama          # downloaded LLMs persist here
+    networks: [asr]
+    restart: unless-stopped
+    gpus: all                         # (Docker Desktop / nvidia runtime)
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: asr-app:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    env_file: .env
+    environment:
+      # wiring to the sibling services (override anything in .env)
+      DATABASE_URL: "host=postgres port=5432 dbname=asr user=asr_admin"
+      OLLAMA_HOST: "ollama:11434"
+      ASR_BACKEND: "cuda"
+    volumes:
+      - appdata:/app/data             # DATA_DIR: HF/whisper cache + downloaded recordings
+    ports:
+      - "127.0.0.1:5530:5530"         # host-loopback only; tunnel/proxy fronts it
+    networks: [asr]
+    restart: unless-stopped
+    gpus: all
+
+  # --- Optional: dedicated tunnel so asr.cnits.co is independent of the prod tunnel ---
+  # Create a Cloudflare tunnel, route asr.cnits.co -> http://app:5530, put its token in
+  # CLOUDFLARE_TUNNEL_TOKEN in .env, then add `--profile tunnel` to the up command.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on: [app]
+    networks: [asr]
+    restart: unless-stopped
+    profiles: ["tunnel"]
+
+volumes:
+  pgdata:      # transcriptions, runs, admins, api keys + per-key webhook config
+  ollama:      # downloaded LLMs
+  appdata:     # whisper/HF model cache + recordings
+
+networks:
+  asr:
+    driver: bridge
