@@ -27,6 +27,13 @@ _wake = threading.Event()        # nudges idle workers when new work is enqueued
 _started = False
 _start_lock = threading.Lock()
 
+# Live-resizable pool. `_desired` is the target worker count (settable from the admin panel
+# via set_concurrency); `_live_count` is how many worker threads are actually alive. Growing
+# spawns threads immediately; shrinking lets surplus workers retire after their current job.
+_desired: int | None = None
+_live_count = 0
+_pool_lock = threading.Lock()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -165,20 +172,69 @@ def load_from_db():
     start()
 
 
+def current_concurrency() -> int:
+    """The live target worker count. Falls back to the boot default before start() runs."""
+    return _desired if _desired is not None else max(1, WORKER_CONCURRENCY)
+
+
+def _spawn(n: int) -> None:
+    """Start n worker threads. Caller must hold _pool_lock."""
+    global _live_count
+    for _ in range(max(0, n)):
+        _live_count += 1
+        threading.Thread(target=_worker_loop, name=f"asr-worker-{_live_count}",
+                         daemon=True).start()
+
+
+def set_concurrency(n: int) -> int:
+    """Resize the pool live and persist the choice. Grows by spawning threads immediately;
+    shrinks by letting surplus workers retire once they finish their current job. Returns the
+    applied value. Headroom validation is the caller's job (see admin_api / metrics.headroom)."""
+    global _desired
+    n = max(1, int(n))
+    with _pool_lock:
+        _desired = n
+        if _live_count < n:
+            _spawn(n - _live_count)
+        # if _live_count > n, the extra workers exit themselves at the top of _worker_loop
+    try:
+        db.set_setting("worker_concurrency", n)
+    except Exception as e:
+        print(f"[jobs] persist worker_concurrency failed: {e}", flush=True)
+    _wake.set()  # wake idle workers so shrinking takes effect promptly
+    print(f"[jobs] worker concurrency set to {n}", flush=True)
+    return n
+
+
 def start():
-    """Idempotently launch the worker pool."""
-    global _started
+    """Idempotently launch the worker pool, sized from the persisted setting (else the env default)."""
+    global _started, _desired
     with _start_lock:
         if _started:
             return
         _started = True
-    for i in range(max(1, WORKER_CONCURRENCY)):
-        threading.Thread(target=_worker_loop, name=f"asr-worker-{i}", daemon=True).start()
-    print(f"[jobs] worker pool started: {WORKER_CONCURRENCY} workers", flush=True)
+    persisted = None
+    try:
+        persisted = db.get_setting("worker_concurrency")
+    except Exception:
+        pass
+    n = max(1, int(persisted)) if persisted else max(1, WORKER_CONCURRENCY)
+    with _pool_lock:
+        _desired = n
+        _spawn(n)
+    print(f"[jobs] worker pool started: {n} workers", flush=True)
 
 
 def _worker_loop():
+    global _live_count
     while True:
+        # Honour a concurrency decrease: a surplus worker retires here, between jobs, so an
+        # in-flight transcription is never interrupted.
+        with _pool_lock:
+            if _desired is not None and _live_count > _desired:
+                _live_count -= 1
+                print(f"[jobs] worker retired → {_live_count} live", flush=True)
+                return
         try:
             did = _process_one()
         except Exception as e:

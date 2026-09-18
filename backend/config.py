@@ -78,7 +78,20 @@ DATABASE_URL = os.getenv("DATABASE_URL", "host=127.0.0.1 port=5433 dbname=asr us
 # Worker pool: how many recordings to process in parallel. The queue is durable
 # (Postgres), so workers on other machines can pull from the same DB later — just
 # point them at the same DATABASE_URL. Sized to GPU capacity; raise as GPUs are added.
+# This is the BOOT default; the live value is set from the DB (settings.worker_concurrency)
+# and can be changed at runtime from the admin panel (jobs.set_concurrency).
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
+
+# Per-worker resource estimates for the admin concurrency headroom check. The Whisper /
+# pyannote models are loaded ONCE and shared across worker threads, so a worker's marginal
+# cost is the per-inference activation (not a full model copy) plus its audio buffers —
+# hence the modest per-worker figures. Conservative defaults; override via env if profiling
+# says otherwise. RESERVE keeps VRAM/RAM free for the co-located production stack + safety.
+WORKER_VRAM_MB = int(os.getenv("WORKER_VRAM_MB", "2200"))      # est. VRAM per concurrent job
+WORKER_RAM_GB = float(os.getenv("WORKER_RAM_GB", "1.5"))       # est. system RAM per concurrent job
+VRAM_RESERVE_MB = int(os.getenv("VRAM_RESERVE_MB", "3000"))    # keep free for prod + headroom
+RAM_RESERVE_GB = float(os.getenv("RAM_RESERVE_GB", "2"))       # keep free for the OS + prod
+MAX_WORKER_CONCURRENCY = int(os.getenv("MAX_WORKER_CONCURRENCY", "12"))  # absolute hard cap
 
 # --- Paths ---
 DATA_DIR = ROOT / "data"

@@ -206,6 +206,20 @@ async function viewDashboard(){
         <h2>Loaded models</h2><div id="models_loaded" class="muted">loading…</div>
         <h2 style="margin-top:16px">API traffic</h2><div id="traffic" class="muted">loading…</div>
       </div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h2 style="margin:0">Worker concurrency</h2>
+        <span id="conc_head" class="muted" style="font-size:12px">—</span>
+      </div>
+      <p class="muted" style="font-size:12px;margin:6px 0">How many recordings transcribe in parallel. The value is checked against free GPU&nbsp;VRAM / RAM before it's applied — if there isn't room it's rejected and the current setting is left unchanged.</p>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>current: <b id="conc_cur">—</b></div>
+        <div>max safe now: <b id="conc_max" class="ok">—</b></div>
+        <input id="conc_input" type="number" min="1" style="width:82px" placeholder="e.g. 4">
+        <button class="sm" onclick="applyConcurrency()">Apply</button>
+        <span id="conc_msg" style="font-size:12px"></span>
+      </div>
     </div>`;
   await refreshMetrics(); timers.push(setInterval(refreshMetrics,3000));
 }
@@ -228,6 +242,14 @@ async function refreshMetrics(){
   el("work_sub").innerHTML=`${w.queued||0} queued · ${w.done||0} done · ${w.error||0} error`+(w.overloaded?` · <span class="err">overloaded</span>`:"");
   el("work_chip").textContent=(w.load_pct||0)+"%"; setBar("work",w.load_pct||0);
   el("qcounts").innerHTML=`${w.queued||0} queued · ${w.running||0} running · ${w.active_stages||0} stages`;
+  // concurrency control (live headroom)
+  const hr=m.headroom||{};
+  if(el("conc_cur")) el("conc_cur").textContent=(w.concurrency!=null?w.concurrency:(hr.current!=null?hr.current:"—"));
+  if(el("conc_max")) el("conc_max").textContent=(hr.max_safe!=null?hr.max_safe:"—");
+  if(el("conc_head")&&hr.max_safe!=null) el("conc_head").textContent=
+    `can go up to ${hr.max_safe} (limited by ${hr.limited_by||"—"})`
+    +(hr.vram_free_mb!=null?` · VRAM free ${(hr.vram_free_mb/1024).toFixed(1)} GB`:"")
+    +(hr.ram_free_gb!=null?` · RAM free ${hr.ram_free_gb} GB`:"");
   // processing list (visuals)
   const jobs=w.jobs||[];
   el("processing").innerHTML = jobs.length ? jobs.map(j=>`
@@ -244,6 +266,21 @@ async function refreshMetrics(){
   // traffic
   const t=m.traffic||{};
   el("traffic").innerHTML=`<div class="stat"><b>${t.rpm||0}</b>req / min</div><div class="stat"><b>${t.rps||0}</b>req / sec</div>`;
+}
+/* api() throws the raw body text; a 409 headroom rejection is JSON {detail:{message,...}} */
+function _errDetail(e){ try{ const j=JSON.parse(e.message); return (j.detail&&(j.detail.message||j.detail))||e.message; }catch(_){ return e.message; } }
+async function applyConcurrency(){
+  const n=parseInt(el("conc_input").value,10), msg=el("conc_msg");
+  if(!n||n<1){ msg.className="err"; msg.textContent="enter a whole number ≥ 1"; return; }
+  msg.className="muted"; msg.textContent="applying…";
+  try{
+    const r=await api("/settings/concurrency",{method:"PUT",body:JSON.stringify({concurrency:n})});
+    msg.className="ok"; msg.textContent=`✓ now ${r.concurrency} workers`;
+    if(el("conc_cur")) el("conc_cur").textContent=r.concurrency;
+    toast(`worker concurrency set to ${r.concurrency}`);
+  }catch(e){
+    const d=_errDetail(e); msg.className="err"; msg.textContent="✗ "+d; toast(d,true);
+  }
 }
 
 /* ---------- recordings ---------- */

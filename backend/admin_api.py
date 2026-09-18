@@ -103,6 +103,37 @@ def live_metrics():
     return metrics.snapshot()
 
 
+# ---------------------------------------------------------------- worker concurrency
+class ConcurrencyBody(BaseModel):
+    concurrency: int
+
+
+@router.get("/settings/concurrency", dependencies=_ADMIN,
+            summary="Current worker concurrency + how high it can safely go right now")
+def get_concurrency():
+    return metrics.headroom()
+
+
+@router.put("/settings/concurrency", dependencies=_ADMIN,
+            summary="Set worker concurrency (validated against live VRAM/RAM headroom)")
+def put_concurrency(body: ConcurrencyBody):
+    n = int(body.concurrency)
+    if n < 1:
+        raise HTTPException(status_code=400, detail={"ok": False, "message": "Concurrency must be at least 1."})
+    hr = metrics.headroom()
+    if n > hr["max_safe"]:
+        # Not enough headroom — reject and tell the admin the safe ceiling. Nothing is changed.
+        raise HTTPException(status_code=409, detail={
+            "ok": False, "requested": n, "max_safe": hr["max_safe"], "limited_by": hr["limited_by"],
+            "message": (f"Not enough {hr['limited_by']} headroom for {n} workers. "
+                        f"The most you can safely run right now is {hr['max_safe']}. "
+                        f"Use {hr['max_safe']} or fewer."),
+            "headroom": hr,
+        })
+    applied = jobs.set_concurrency(n)
+    return {"ok": True, "concurrency": applied, "headroom": metrics.headroom()}
+
+
 # ---------------------------------------------------------------- config: models/backend
 _WHISPER_OPTS = [
     {"id": "large-v3-turbo", "speed": "fastest · great accuracy (recommended)"},
