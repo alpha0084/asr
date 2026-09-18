@@ -120,7 +120,7 @@ def headroom(gpu=None, ram=None) -> dict:
     ONCE and shared across workers, each extra worker's marginal cost is just its per-inference
     activation; we still hold a VRAM/RAM reserve free for the co-located production stack."""
     from .config import (WORKER_VRAM_MB, WORKER_RAM_GB, VRAM_RESERVE_MB,
-                         RAM_RESERVE_GB, MAX_WORKER_CONCURRENCY)
+                         RAM_RESERVE_GB, MAX_WORKER_CONCURRENCY, AUTOSCALE_MAX)
     cur = jobs.current_concurrency()
     gpu = gpu if gpu is not None else _gpu()
     ram = ram if ram is not None else _ram()
@@ -135,7 +135,9 @@ def headroom(gpu=None, ram=None) -> dict:
     limited_by = min(caps, key=caps.get)
     return {"current": cur, "max_safe": max_safe, "hard_cap": MAX_WORKER_CONCURRENCY,
             "limited_by": limited_by, "vram_free_mb": vram_free, "ram_free_gb": ram_free,
-            "per_worker_vram_mb": WORKER_VRAM_MB, "per_worker_ram_gb": WORKER_RAM_GB}
+            "per_worker_vram_mb": WORKER_VRAM_MB, "per_worker_ram_gb": WORKER_RAM_GB,
+            "autoscale": jobs.autoscale_enabled(), "baseline": jobs.current_baseline(),
+            "autoscale_max": AUTOSCALE_MAX}
 
 
 def snapshot() -> dict:

@@ -212,13 +212,21 @@ async function viewDashboard(){
         <h2 style="margin:0">Worker concurrency</h2>
         <span id="conc_head" class="muted" style="font-size:12px">—</span>
       </div>
-      <p class="muted" style="font-size:12px;margin:6px 0">How many recordings transcribe in parallel. The value is checked against free GPU&nbsp;VRAM / RAM before it's applied — if there isn't room it's rejected and the current setting is left unchanged.</p>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <div>current: <b id="conc_cur">—</b></div>
-        <div>max safe now: <b id="conc_max" class="ok">—</b></div>
+      <p class="muted" style="font-size:12px;margin:6px 0">How many recordings transcribe in parallel. Your value is the <b>resting baseline</b> — validated against free GPU&nbsp;VRAM / RAM before it's applied (rejected, unchanged, if there isn't room). With <b>autoscale</b> on, workers automatically burst above the baseline when a backlog builds and settle back when idle.</p>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div>live now: <b id="conc_cur">—</b></div>
+        <div>baseline: <b id="conc_base">—</b></div>
+        <div>max safe: <b id="conc_max" class="ok">—</b></div>
         <input id="conc_input" type="number" min="1" style="width:82px" placeholder="e.g. 4">
-        <button class="sm" onclick="applyConcurrency()">Apply</button>
+        <button class="sm" onclick="applyConcurrency()">Set baseline</button>
         <span id="conc_msg" style="font-size:12px"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input id="conc_auto" type="checkbox" onchange="toggleAutoscale()" style="width:auto;margin:0">
+          <span>Autoscale — burst up to <b id="conc_ceil">—</b> workers when recordings pile up</span>
+        </label>
+        <span id="auto_msg" style="font-size:12px"></span>
       </div>
     </div>`;
   await refreshMetrics(); timers.push(setInterval(refreshMetrics,3000));
@@ -242,14 +250,16 @@ async function refreshMetrics(){
   el("work_sub").innerHTML=`${w.queued||0} queued · ${w.done||0} done · ${w.error||0} error`+(w.overloaded?` · <span class="err">overloaded</span>`:"");
   el("work_chip").textContent=(w.load_pct||0)+"%"; setBar("work",w.load_pct||0);
   el("qcounts").innerHTML=`${w.queued||0} queued · ${w.running||0} running · ${w.active_stages||0} stages`;
-  // concurrency control (live headroom)
+  // concurrency control (live headroom + autoscale state)
   const hr=m.headroom||{};
   if(el("conc_cur")) el("conc_cur").textContent=(w.concurrency!=null?w.concurrency:(hr.current!=null?hr.current:"—"));
+  if(el("conc_base")) el("conc_base").textContent=(hr.baseline!=null?hr.baseline:"—");
   if(el("conc_max")) el("conc_max").textContent=(hr.max_safe!=null?hr.max_safe:"—");
+  if(el("conc_ceil")) el("conc_ceil").textContent=(hr.autoscale_max!=null?hr.autoscale_max:"—");
+  if(el("conc_auto")&&document.activeElement!==el("conc_auto")) el("conc_auto").checked=!!hr.autoscale;
   if(el("conc_head")&&hr.max_safe!=null) el("conc_head").textContent=
-    `can go up to ${hr.max_safe} (limited by ${hr.limited_by||"—"})`
-    +(hr.vram_free_mb!=null?` · VRAM free ${(hr.vram_free_mb/1024).toFixed(1)} GB`:"")
-    +(hr.ram_free_gb!=null?` · RAM free ${hr.ram_free_gb} GB`:"");
+    `${hr.autoscale?"autoscaling ON":"autoscale off"} · live ${w.concurrency||0} · baseline ${hr.baseline||0} · max safe ${hr.max_safe} (${hr.limited_by||"—"})`
+    +(hr.vram_free_mb!=null?` · VRAM free ${(hr.vram_free_mb/1024).toFixed(1)} GB`:"");
   // processing list (visuals)
   const jobs=w.jobs||[];
   el("processing").innerHTML = jobs.length ? jobs.map(j=>`
@@ -280,6 +290,17 @@ async function applyConcurrency(){
     toast(`worker concurrency set to ${r.concurrency}`);
   }catch(e){
     const d=_errDetail(e); msg.className="err"; msg.textContent="✗ "+d; toast(d,true);
+  }
+}
+async function toggleAutoscale(){
+  const on=el("conc_auto").checked, msg=el("auto_msg");
+  msg.className="muted"; msg.textContent="…";
+  try{
+    const r=await api("/settings/autoscale",{method:"PUT",body:JSON.stringify({enabled:on})});
+    msg.className="ok"; msg.textContent=r.autoscale?"✓ autoscale on":"✓ autoscale off";
+    toast(`autoscale ${r.autoscale?"enabled":"disabled"}`);
+  }catch(e){
+    const d=_errDetail(e); msg.className="err"; msg.textContent="✗ "+d; el("conc_auto").checked=!on; toast(d,true);
   }
 }
 

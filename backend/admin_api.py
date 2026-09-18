@@ -134,6 +134,17 @@ def put_concurrency(body: ConcurrencyBody):
     return {"ok": True, "concurrency": applied, "headroom": metrics.headroom()}
 
 
+class AutoscaleBody(BaseModel):
+    enabled: bool
+
+
+@router.put("/settings/autoscale", dependencies=_ADMIN,
+            summary="Enable/disable autoscaling (burst workers up on a backlog, settle back when idle)")
+def put_autoscale(body: AutoscaleBody):
+    on = jobs.set_autoscale(bool(body.enabled))
+    return {"ok": True, "autoscale": on, "headroom": metrics.headroom()}
+
+
 # ---------------------------------------------------------------- config: models/backend
 _WHISPER_OPTS = [
     {"id": "large-v3-turbo", "speed": "fastest · great accuracy (recommended)"},

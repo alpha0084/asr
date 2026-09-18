@@ -93,6 +93,16 @@ VRAM_RESERVE_MB = int(os.getenv("VRAM_RESERVE_MB", "3000"))    # keep free for p
 RAM_RESERVE_GB = float(os.getenv("RAM_RESERVE_GB", "2"))       # keep free for the OS + prod
 MAX_WORKER_CONCURRENCY = int(os.getenv("MAX_WORKER_CONCURRENCY", "12"))  # absolute hard cap
 
+# Autoscaling: when a backlog of recordings builds, temporarily raise the live worker count above
+# the admin-set resting baseline toward the backlog size — bounded by AUTOSCALE_MAX and the
+# real-time VRAM/RAM headroom so a burst never overcommits the shared GPU — then settle back to the
+# baseline after the queue has been idle for the cooldown. Toggleable live from the admin panel.
+AUTOSCALE_ENABLED_DEFAULT = os.getenv("AUTOSCALE_ENABLED", "true").lower() not in ("0", "false", "no")
+AUTOSCALE_MAX = int(os.getenv("AUTOSCALE_MAX", str(MAX_WORKER_CONCURRENCY)))   # burst ceiling
+AUTOSCALE_INTERVAL_SEC = float(os.getenv("AUTOSCALE_INTERVAL_SEC", "5"))       # poll cadence
+AUTOSCALE_COOLDOWN_SEC = float(os.getenv("AUTOSCALE_COOLDOWN_SEC", "45"))      # idle before scale-down
+AUTOSCALE_STEP = int(os.getenv("AUTOSCALE_STEP", "2"))                         # scale-down granularity
+
 # --- Paths ---
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)

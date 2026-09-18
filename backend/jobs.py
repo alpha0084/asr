@@ -27,12 +27,16 @@ _wake = threading.Event()        # nudges idle workers when new work is enqueued
 _started = False
 _start_lock = threading.Lock()
 
-# Live-resizable pool. `_desired` is the target worker count (settable from the admin panel
-# via set_concurrency); `_live_count` is how many worker threads are actually alive. Growing
-# spawns threads immediately; shrinking lets surplus workers retire after their current job.
+# Live-resizable pool. `_desired` is the LIVE target worker count (may be autoscaled above the
+# baseline); `_live_count` is how many worker threads are actually alive. Growing spawns threads
+# immediately; shrinking lets surplus workers retire after their current job. `_baseline` is the
+# admin-set resting floor autoscaling returns to; `_autoscale` toggles the autoscaler.
 _desired: int | None = None
 _live_count = 0
 _pool_lock = threading.Lock()
+_baseline: int | None = None
+_autoscale = False
+_autoscale_stop = threading.Event()
 
 
 def _now() -> str:
@@ -173,8 +177,18 @@ def load_from_db():
 
 
 def current_concurrency() -> int:
-    """The live target worker count. Falls back to the boot default before start() runs."""
+    """The LIVE target worker count (may be autoscaled above the baseline). Falls back to the boot
+    default before start() runs."""
     return _desired if _desired is not None else max(1, WORKER_CONCURRENCY)
+
+
+def current_baseline() -> int:
+    """The admin-set resting concurrency — the floor autoscaling returns to when idle."""
+    return _baseline if _baseline is not None else current_concurrency()
+
+
+def autoscale_enabled() -> bool:
+    return bool(_autoscale)
 
 
 def _spawn(n: int) -> None:
@@ -186,10 +200,9 @@ def _spawn(n: int) -> None:
                          daemon=True).start()
 
 
-def set_concurrency(n: int) -> int:
-    """Resize the pool live and persist the choice. Grows by spawning threads immediately;
-    shrinks by letting surplus workers retire once they finish their current job. Returns the
-    applied value. Headroom validation is the caller's job (see admin_api / metrics.headroom)."""
+def _resize(n: int) -> int:
+    """Set the LIVE target worker count — grow instantly, shrink by retiring surplus workers between
+    jobs. Does NOT persist; used by both the manual setter and the autoscaler."""
     global _desired
     n = max(1, int(n))
     with _pool_lock:
@@ -197,32 +210,108 @@ def set_concurrency(n: int) -> int:
         if _live_count < n:
             _spawn(n - _live_count)
         # if _live_count > n, the extra workers exit themselves at the top of _worker_loop
+    _wake.set()
+    return n
+
+
+def set_concurrency(n: int) -> int:
+    """Admin action: set the resting BASELINE concurrency, persist it, and resize live to it.
+    Autoscaling (when on) may still burst above this under load. Headroom validation is the
+    caller's job (see admin_api / metrics.headroom)."""
+    global _baseline
+    n = max(1, int(n))
+    _baseline = n
     try:
         db.set_setting("worker_concurrency", n)
     except Exception as e:
         print(f"[jobs] persist worker_concurrency failed: {e}", flush=True)
-    _wake.set()  # wake idle workers so shrinking takes effect promptly
-    print(f"[jobs] worker concurrency set to {n}", flush=True)
+    _resize(n)
+    print(f"[jobs] worker concurrency baseline set to {n}", flush=True)
     return n
 
 
+def set_autoscale(on: bool) -> bool:
+    """Enable/disable autoscaling and persist. Turning it off settles the pool back to the baseline."""
+    global _autoscale
+    _autoscale = bool(on)
+    try:
+        db.set_setting("autoscale_enabled", _autoscale)
+    except Exception as e:
+        print(f"[jobs] persist autoscale_enabled failed: {e}", flush=True)
+    if not _autoscale and _baseline is not None:
+        _resize(_baseline)       # drop any burst back to the resting floor
+    print(f"[jobs] autoscale {'enabled' if _autoscale else 'disabled'}", flush=True)
+    return _autoscale
+
+
+def _autoscale_ceiling() -> int:
+    """Highest live worker count autoscaling may use right now: bounded by AUTOSCALE_MAX and the
+    real-time VRAM/RAM headroom, so a burst never overcommits the shared GPU."""
+    from . import metrics
+    from .config import AUTOSCALE_MAX
+    hr = metrics.headroom()
+    return max(current_baseline(), min(AUTOSCALE_MAX, hr.get("max_safe", current_concurrency())))
+
+
+def _autoscaler_loop():
+    """Burst the pool toward the backlog size when work piles up; settle back to the baseline after
+    an idle cooldown. A no-op while autoscaling is off."""
+    import time
+    from .config import AUTOSCALE_INTERVAL_SEC, AUTOSCALE_COOLDOWN_SEC, AUTOSCALE_STEP
+    idle_since = None
+    while not _autoscale_stop.wait(AUTOSCALE_INTERVAL_SEC):
+        try:
+            if not _autoscale:
+                idle_since = None
+                continue
+            counts = db.queue_counts()
+            demand = counts.get("queued", 0) + counts.get("running", 0)
+            cur = current_concurrency()
+            if demand > cur:
+                # scale UP toward the backlog, capped by the live headroom ceiling — drain fast
+                target = min(demand, _autoscale_ceiling())
+                if target > cur:
+                    _resize(target)
+                    print(f"[autoscale] backlog {demand} → {target} workers", flush=True)
+                idle_since = None
+            elif demand == 0 and cur > current_baseline():
+                # idle → settle back to the baseline after a cooldown (avoids flapping)
+                if idle_since is None:
+                    idle_since = time.time()
+                elif time.time() - idle_since >= AUTOSCALE_COOLDOWN_SEC:
+                    target = max(current_baseline(), cur - AUTOSCALE_STEP)
+                    _resize(target)
+                    print(f"[autoscale] idle → {target} workers", flush=True)
+                    idle_since = None if target <= current_baseline() else time.time()
+            else:
+                idle_since = None
+        except Exception as e:
+            print(f"[autoscale] error: {e}", flush=True)
+
+
 def start():
-    """Idempotently launch the worker pool, sized from the persisted setting (else the env default)."""
-    global _started, _desired
+    """Idempotently launch the worker pool + autoscaler, sized from persisted settings."""
+    global _started, _baseline, _autoscale
     with _start_lock:
         if _started:
             return
         _started = True
+    from .config import AUTOSCALE_ENABLED_DEFAULT
     persisted = None
     try:
         persisted = db.get_setting("worker_concurrency")
     except Exception:
         pass
-    n = max(1, int(persisted)) if persisted else max(1, WORKER_CONCURRENCY)
-    with _pool_lock:
-        _desired = n
-        _spawn(n)
-    print(f"[jobs] worker pool started: {n} workers", flush=True)
+    _baseline = max(1, int(persisted)) if persisted else max(1, WORKER_CONCURRENCY)
+    try:
+        a = db.get_setting("autoscale_enabled")
+        _autoscale = AUTOSCALE_ENABLED_DEFAULT if a is None else bool(a)
+    except Exception:
+        _autoscale = AUTOSCALE_ENABLED_DEFAULT
+    _resize(_baseline)
+    threading.Thread(target=_autoscaler_loop, name="asr-autoscaler", daemon=True).start()
+    print(f"[jobs] worker pool started: {_baseline} workers "
+          f"(autoscale={'on' if _autoscale else 'off'})", flush=True)
 
 
 def _worker_loop():
