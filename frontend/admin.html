@@ -25,6 +25,7 @@
   button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 15px;font-size:13.5px;
     font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
   button:hover{filter:brightness(1.07)}button:active{transform:translateY(1px)}
+  button:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.4)}button:disabled:hover{filter:grayscale(.4)}
   button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
   button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
   button.danger{background:var(--err)}button.warn{background:var(--warn);color:#111}
@@ -317,6 +318,9 @@ async function loadTasks(){
   el("tasks").innerHTML=`<div class="tbl-wrap"><table><tr><th>File</th><th>Status</th><th>Summary</th><th>Analytics</th><th>Webhook</th><th>Created</th><th></th></tr>`+
     ts.map(t=>{
       const running=t.status==="running";
+      const done=t.status==="done";              // first transcription finished
+      const summarized=t.summary_status==="done";
+      const analyzed=t.analytics_status==="done";
       const statusCell=running
         ? `<div style="display:flex;align-items:center;gap:6px"><span class="spin"></span><span class="b-run" style="font-size:12px;font-weight:600">${esc(t.stage||"processing")}</span></div><div class="pbar" style="margin-top:6px"><i></i></div>`
         : badge(t.status)+(t.error?`<div class="err" style="font-size:11px">${esc(t.error)}</div>`:"");
@@ -330,10 +334,13 @@ async function loadTasks(){
           <button class="sm" onclick="viewTranscriptData('${t.task_id}')">Transcript</button>
           <button class="sm" style="background:var(--accent2)" onclick="viewSummaryData('${t.task_id}')">Summary</button>
           <button class="sm" style="background:var(--accent2)" onclick="viewAnalyticsData('${t.task_id}')">Analytics</button>
-          <button class="sm ghost" onclick="viewHistory('${t.task_id}')">History</button>
-          <button class="sm ghost" onclick="rerun('${t.task_id}','analytics')">Re-analyze</button>
-          <button class="sm ghost" onclick="rerun('${t.task_id}','summary')">Re-summarize</button>
-          <button class="sm warn" onclick="rerun('${t.task_id}','transcribe')">Re-transcribe</button>
+          ${summarized
+            ? `<button class="sm ghost" onclick="rerun('${t.task_id}','summary')">Re-summarize</button>`
+            : `<button class="sm ghost" onclick="rerun('${t.task_id}','summary')" ${done?"":"disabled"} title="${done?'Generate the summary':'Transcription not finished yet'}">Summarize</button>`}
+          ${analyzed
+            ? `<button class="sm ghost" onclick="rerun('${t.task_id}','analytics')">Re-analyze</button>`
+            : `<button class="sm ghost" onclick="rerun('${t.task_id}','analytics')" ${done?"":"disabled"} title="${done?'Run the analytics':'Transcription not finished yet'}">Analyze</button>`}
+          <button class="sm warn" onclick="rerun('${t.task_id}','transcribe')" ${done?"":"disabled"} title="${done?'Transcribe again':'Wait for the first transcription to finish'}">Re-transcribe</button>
           <button class="sm danger" onclick="del('${t.task_id}')">Delete</button>
         </div></td></tr>`;}).join("")+`</table></div>`;
 }
