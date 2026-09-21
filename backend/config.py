@@ -82,6 +82,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "host=127.0.0.1 port=5433 dbname=asr us
 # and can be changed at runtime from the admin panel (jobs.set_concurrency).
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
 
+# No-speech gate: a cheap VAD pass (Silero, bundled with faster-whisper) runs before the GPU
+# pipeline; a recording with less than MIN_SPEECH_SECONDS of detected speech OR fewer than
+# MIN_SPEECH_SEGMENTS speech regions is skipped — no Whisper / pyannote / LLM — and reported as
+# no-speech. Kills wasted transcription of dead-air / voicemail / hold-music calls. Threshold is
+# deliberately low so a genuine 2-second "hello?" still transcribes.
+VAD_GATE_ENABLED = os.getenv("VAD_GATE_ENABLED", "true").lower() not in ("0", "false", "no")
+MIN_SPEECH_SECONDS = float(os.getenv("MIN_SPEECH_SECONDS", "2.0"))
+MIN_SPEECH_SEGMENTS = int(os.getenv("MIN_SPEECH_SEGMENTS", "1"))
+
 # Per-worker resource estimates for the admin concurrency headroom check. The Whisper /
 # pyannote models are loaded ONCE and shared across worker threads, so a worker's marginal
 # cost is the per-inference activation (not a full model copy) plus its audio buffers —

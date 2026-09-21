@@ -14,15 +14,38 @@ import os
 
 from .. import settings
 from ..config import (AUDIO_CLEANUP, AUDIO_CLEANUP_FILTERS, DATA_DIR,
-                      SPEAKER_PAUSE_GAP)
+                      MIN_SPEECH_SECONDS, MIN_SPEECH_SEGMENTS, SPEAKER_PAUSE_GAP,
+                      VAD_GATE_ENABLED)
 from ..utils import fmt_ts, speaker_label
 from . import (analyze, assemble, diarize, ingest, preprocess, refine_speakers,
-               summarize, transcribe, translate)
+               summarize, transcribe, translate, vad)
 
 log = logging.getLogger(__name__)
 
 # Stages for the first (transcribe) pass; summary/analytics run separately.
 STAGES = ["Ingesting", "Preprocessing", "Transcribing", "Diarizing", "Assembling", "Translating"]
+
+
+def _no_speech_result(audio_path, meta, speech_sec, model, spk_mode, t0) -> dict:
+    """A completed transcript result for a recording the VAD gate found blank: empty transcript,
+    flagged `no_speech` so the webhook/consumer can mark it skipped instead of transcribed.
+    Same shape as a normal result so the status/webhook/admin paths need no special-casing."""
+    dur = meta.get("duration", 0.0)
+    return {
+        "input": str(audio_path), "filename": audio_path.name,
+        "language": None, "language_probability": 0.0, "target_language": None,
+        "duration_seconds": dur,
+        "stats": {"duration_seconds": round(dur, 1), "speech_seconds": round(speech_sec, 1),
+                  "silence_seconds": round(max(0.0, dur - speech_sec), 1),
+                  "num_speakers": 0, "per_speaker": {}},
+        "roles": {}, "turns": [],
+        "full_text": "", "full_text_translated": "",
+        "summary": {}, "analytics": {},
+        "no_speech": True, "speech_seconds": round(speech_sec, 2),
+        "elapsed_seconds": round(time.time() - t0, 1),
+        "params": {"whisper_model": model, "speaker_mode": spk_mode, "vad_gate": True,
+                   "min_speech_seconds": MIN_SPEECH_SECONDS},
+    }
 
 
 def transcribe_only(src, model=None, language=None, speakers=None,
@@ -57,6 +80,16 @@ def transcribe_only(src, model=None, language=None, speakers=None,
     wav = preprocess.to_wav(audio_path, work_dir / "audio16k.wav",
                             clean=AUDIO_CLEANUP, filters=AUDIO_CLEANUP_FILTERS)
     waveform, sr = preprocess.load_waveform(wav)
+
+    # No-speech gate: a blank / dead-air / voicemail recording has (almost) no speech, so a cheap
+    # VAD pass skips the whole GPU pipeline for it instead of transcribing silence.
+    if VAD_GATE_ENABLED:
+        stage("Checking speech")
+        speech_sec, speech_segs = vad.speech_stats(waveform, sr)
+        if speech_sec < MIN_SPEECH_SECONDS or speech_segs < MIN_SPEECH_SEGMENTS:
+            log.info("no-speech gate: %.2fs speech / %d segments (< %.1fs / %d) — skipping pipeline",
+                     speech_sec, speech_segs, MIN_SPEECH_SECONDS, MIN_SPEECH_SEGMENTS)
+            return _no_speech_result(audio_path, meta, speech_sec, model, spk_mode, t0)
 
     stage("Transcribing")
     tr = transcribe.transcribe(

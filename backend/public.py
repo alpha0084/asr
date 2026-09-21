@@ -46,6 +46,9 @@ def public_result(job: dict) -> dict:
         "full_text_translated": r.get("full_text_translated", ""),
         "summary": r.get("summary", {}),
         "analytics": r.get("analytics", {}),
+        # VAD gate: true when the recording was blank (no speech) and the pipeline was skipped.
+        "no_speech": bool(r.get("no_speech", False)),
+        "speech_seconds": r.get("speech_seconds"),
     })
     return out
 
