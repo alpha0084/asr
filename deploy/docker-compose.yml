@@ -62,8 +62,32 @@ services:
     ports:
       - "127.0.0.1:5530:5530"         # host-loopback only; tunnel/proxy fronts it
     networks: [asr]
-    restart: unless-stopped
+    restart: unless-stopped           # auto-start on boot + auto-restart on crash/exit
     gpus: all
+    # Detect a HUNG (not crashed) app so the autoheal sidecar can restart it. uvicorn serves
+    # /docs regardless of worker load, so this never false-trips during a long transcription.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5530/docs >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s              # give the app time to come up on first boot
+    labels:
+      autoheal: "true"                # opt this container into the autoheal watcher below
+
+  # Auto-heal: restarts any container that goes UNHEALTHY (e.g. a hung uvicorn that didn't exit).
+  # Docker's `restart: unless-stopped` only covers crashes/reboots; this covers hangs — together
+  # they give the same self-healing the /state supervisor keep-alive provides, but baked into the
+  # image/stack so a rebuild keeps it. Watches only containers labelled `autoheal=true`.
+  autoheal:
+    image: willfarrell/autoheal:latest
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"          # check every 30s
+      AUTOHEAL_START_PERIOD: "120"     # match the app's start_period
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # read-only container control
+    restart: unless-stopped
 
   # --- Optional: dedicated tunnel so asr.cnits.co is independent of the prod tunnel ---
   # Create a Cloudflare tunnel, route asr.cnits.co -> http://app:5530, put its token in

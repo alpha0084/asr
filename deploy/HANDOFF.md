@@ -70,12 +70,21 @@ add this **above** the `- service: http_status:404` line, then restart that clou
 4. `docker compose --profile tunnel up -d`
 Now ASR has its own tunnel — independent of production.
 
-## 6. Keep it running 24/7
+## 6. Keep it running 24/7 (auto-start + self-heal)
+Auto-recovery is **baked into the stack** — no supervisor/cron to set up:
+- Every service uses **`restart: unless-stopped`** → they **auto-start on boot** and
+  **auto-restart on crash/exit**.
+- The **`autoheal`** sidecar watches the app's healthcheck and **restarts it if it hangs**
+  (unhealthy but not crashed) — the case a plain restart policy misses.
+- So a dead/hung app, an OOM kill, or a container restart all recover on their own.
+
+Just make sure Docker itself comes back:
 - Docker Desktop → Settings → General → **“Start Docker Desktop when you log in.”**
 - Set the machine to **auto-login** (or run Docker as a service) so a reboot brings it back.
-- The compose services already use `restart: unless-stopped`, so they auto-start with Docker.
 - If there's a **nightly shutdown** task in Windows Task Scheduler, disable it (or use
   BIOS Wake-on-LAN) — otherwise the box (and production) go down every night.
+
+Check health anytime: `docker compose ps` (look for `healthy` on `app`).
 
 ## Everyday ops
 ```powershell
