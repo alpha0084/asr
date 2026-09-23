@@ -295,16 +295,22 @@ def set_key_webhook(kid: str, body: KeyWebhookBody):
 
 
 # ---------------------------------------------------------------- dashboard: recordings
-@router.get("/tasks", dependencies=_ADMIN, summary="All recordings + statuses")
-def list_tasks():
+@router.get("/tasks", dependencies=_ADMIN, summary="Recordings + statuses (paginated, date-filterable)")
+def list_tasks(page: int = 1, limit: int = 25, date_from: str = "", date_to: str = ""):
+    page = max(1, int(page))
+    limit = max(1, min(200, int(limit)))
+    df = date_from.strip() or None
+    dt = date_to.strip() or None
+    total = db.count_recordings(df, dt)
     items = []
-    for j in jobs.list_jobs():
+    # Already newest-first + windowed by SQL; live progress merged in for the running rows.
+    for j in jobs.list_jobs(limit=limit, offset=(page - 1) * limit, date_from=df, date_to=dt):
         item = public.task_list_item(j)
         item["callback_result"] = j.get("callback_result")
         item["error"] = j.get("error")
         items.append(item)
-    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return items
+    return {"items": items, "total": total, "page": page, "limit": limit,
+            "pages": max(1, (total + limit - 1) // limit)}
 
 
 @router.get("/tasks/{tid}", dependencies=_ADMIN, summary="One recording (full result)")

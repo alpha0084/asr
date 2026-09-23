@@ -178,18 +178,45 @@ def load_one(tid: str) -> dict | None:
     return _row_to_job(r) if r else None
 
 
-def list_recordings() -> list:
-    """Metadata only (no heavy result_json), newest first — for the dashboard list."""
+def _recordings_where(date_from=None, date_to=None):
+    """created_at date-range filter (YYYY-MM-DD, inclusive of both ends) → (WHERE sql, params)."""
+    clauses, params = [], []
+    if date_from:
+        clauses.append("created_at >= %s")
+        params.append(date_from)                                  # midnight of date_from
+    if date_to:
+        clauses.append("created_at < (%s::date + interval '1 day')")  # whole of date_to included
+        params.append(date_to)
+    return (("WHERE " + " AND ".join(clauses)) if clauses else ""), params
+
+
+def list_recordings(limit: int | None = None, offset: int = 0,
+                    date_from=None, date_to=None) -> list:
+    """Metadata only (no heavy result_json), newest first — for the admin recordings list.
+    Optional created_at date range + limit/offset for pagination."""
+    where, params = _recordings_where(date_from, date_to)
+    sql = ("SELECT id, filename, source, status, stage, summary_status, "
+           "analytics_status, error, created_at, updated_at FROM recordings "
+           f"{where} ORDER BY created_at DESC")
+    if limit is not None:
+        sql += " LIMIT %s OFFSET %s"
+        params = params + [int(limit), int(offset)]
     with _conn() as c, c.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT id, filename, source, status, stage, summary_status, "
-                    "analytics_status, error, created_at, updated_at FROM recordings "
-                    "ORDER BY created_at DESC")
+        cur.execute(sql, params)
         rows = cur.fetchall()
     for r in rows:
         for tk in ("created_at", "updated_at"):
             if r.get(tk) is not None:
                 r[tk] = r[tk].isoformat()
     return rows
+
+
+def count_recordings(date_from=None, date_to=None) -> int:
+    """Total recordings matching the (optional) date range — for pagination."""
+    where, params = _recordings_where(date_from, date_to)
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM recordings {where}", params)
+        return int(cur.fetchone()[0])
 
 
 def claim_transcribe() -> dict | None:
