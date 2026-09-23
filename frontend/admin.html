@@ -75,6 +75,12 @@
   .bar > i{display:block;height:100%;border-radius:6px;background:var(--accent);width:0;transition:width .6s ease,background .3s}
   .bar.g > i{background:var(--good)}.bar.a > i{background:var(--warn)}.bar.r > i{background:var(--err)}
   .chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:16px;background:var(--panel2);border:1px solid var(--line)}
+  .rpill{font-size:12px;font-weight:600;padding:5px 11px;border-radius:16px;background:var(--panel2);
+    border:1px solid var(--line);color:var(--muted);cursor:pointer;user-select:none;transition:all .12s}
+  .rpill:hover{color:var(--text);border-color:var(--accent)}
+  .rpill.active{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 2px 8px color-mix(in srgb,var(--accent) 40%,transparent)}
+  .fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .fdiv{width:1px;height:22px;background:var(--line);margin:0 3px}
   .spin{width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:sp .8s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
   .pbar{height:6px;border-radius:5px;background:var(--panel2);overflow:hidden;position:relative}
@@ -311,9 +317,9 @@ async function viewRecordings(){
   el("view").innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <h2 style="margin:0">Recordings</h2>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <input id="recSearch" type="search" placeholder="Search file / task id" style="width:190px;padding:5px 10px" onkeydown="if(event.key==='Enter')applyRecFilter()">
-        <select id="recStatus" onchange="applyRecFilter()" style="width:auto;padding:5px 8px">
+      <div class="fbar">
+        <input id="recSearch" type="search" placeholder="🔍 Search file / task id" style="width:200px;padding:6px 11px" onkeydown="if(event.key==='Enter')applyRecFilter()">
+        <select id="recStatus" onchange="applyRecFilter()" style="width:auto;padding:6px 9px">
           <option value="">All statuses</option>
           <option value="done">Done</option>
           <option value="running">Processing</option>
@@ -321,19 +327,29 @@ async function viewRecordings(){
           <option value="error">Error</option>
           <option value="no_speech">No speech</option>
         </select>
-        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px">From <input id="recFrom" type="date" style="width:auto;padding:5px 8px"></label>
-        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px">To <input id="recTo" type="date" style="width:auto;padding:5px 8px"></label>
-        <button class="sm" onclick="applyRecFilter()">Filter</button>
-        <button class="sm ghost" onclick="clearRecFilter()">Clear</button>
-        <select id="recLimit" onchange="applyRecFilter()" style="width:auto;padding:5px 8px" title="Rows per page">
+        <select id="recLimit" onchange="applyRecFilter()" style="width:auto;padding:6px 9px" title="Rows per page">
           <option value="25">25 / page</option>
           <option value="50">50 / page</option>
           <option value="100">100 / page</option>
         </select>
-        <button class="ghost sm" onclick="loadTasks()">Refresh</button>
+        <button class="ghost sm" onclick="loadTasks()">↻ Refresh</button>
       </div>
     </div>
-    <div id="tasks" style="margin-top:12px">loading…</div>
+    <div class="fbar" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <span class="muted" style="font-size:12px;font-weight:600">📅 Date</span>
+      <span class="rpill" id="rp_all"   onclick="recPreset('all')">All time</span>
+      <span class="rpill" id="rp_today" onclick="recPreset('today')">Today</span>
+      <span class="rpill" id="rp_7d"    onclick="recPreset('7d')">Last 7d</span>
+      <span class="rpill" id="rp_30d"   onclick="recPreset('30d')">Last 30d</span>
+      <span class="rpill" id="rp_month" onclick="recPreset('month')">This month</span>
+      <span class="fdiv"></span>
+      <span class="muted" style="font-size:12px">Custom</span>
+      <input id="recFrom" type="date" style="width:auto;padding:6px 9px" onchange="applyRecFilter()" title="From">
+      <span class="muted">→</span>
+      <input id="recTo" type="date" style="width:auto;padding:6px 9px" onchange="applyRecFilter()" title="To">
+      <button class="sm ghost" onclick="clearRecFilter()">Clear</button>
+    </div>
+    <div id="tasks" style="margin-top:14px">loading…</div>
     <div id="recpager" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
   </div>`;
   el("recFrom").value=recFrom; el("recTo").value=recTo;
@@ -355,8 +371,33 @@ function clearRecFilter(){
   if(el("recStatus"))el("recStatus").value=""; if(el("recSearch"))el("recSearch").value="";
   recPage=1; loadTasks();
 }
+function ymd(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
+function _presetRange(kind){
+  const now=new Date();
+  if(kind==='all') return ['',''];
+  const to=ymd(now);
+  if(kind==='today') return [to,to];
+  if(kind==='7d'){const d=new Date(now);d.setDate(d.getDate()-6);return [ymd(d),to];}
+  if(kind==='30d'){const d=new Date(now);d.setDate(d.getDate()-29);return [ymd(d),to];}
+  if(kind==='month') return [ymd(new Date(now.getFullYear(),now.getMonth(),1)),to];
+  return [null,null];
+}
+function recPreset(kind){
+  const [f,t]=_presetRange(kind);
+  recFrom=f; recTo=t;
+  if(el("recFrom"))el("recFrom").value=f;
+  if(el("recTo"))el("recTo").value=t;
+  recPage=1; loadTasks();
+}
+/* Highlight whichever preset matches the active range (or none for a custom range). */
+function _syncPresetHl(){
+  let match="";
+  for(const k of ['all','today','7d','30d','month']){ const [f,t]=_presetRange(k); if(f===recFrom&&t===recTo){match=k;break;} }
+  for(const k of ['all','today','7d','30d','month']){ const e=el('rp_'+k); if(e) e.classList.toggle('active',k===match); }
+}
 function recGoto(p){ recPage=Math.max(1,p); loadTasks(); }
 async function loadTasks(){
+  _syncPresetHl();
   const qs=new URLSearchParams({page:recPage,limit:recLimit});
   if(recFrom) qs.set("date_from",recFrom);
   if(recTo) qs.set("date_to",recTo);
