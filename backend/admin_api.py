@@ -296,15 +296,18 @@ def set_key_webhook(kid: str, body: KeyWebhookBody):
 
 # ---------------------------------------------------------------- dashboard: recordings
 @router.get("/tasks", dependencies=_ADMIN, summary="Recordings + statuses (paginated, date-filterable)")
-def list_tasks(page: int = 1, limit: int = 25, date_from: str = "", date_to: str = ""):
+def list_tasks(page: int = 1, limit: int = 25, date_from: str = "", date_to: str = "",
+               status: str = ""):
     page = max(1, int(page))
     limit = max(1, min(200, int(limit)))
     df = date_from.strip() or None
     dt = date_to.strip() or None
-    total = db.count_recordings(df, dt)
+    st = status.strip() or None
+    total = db.count_recordings(df, dt, st)
     items = []
     # Already newest-first + windowed by SQL; live progress merged in for the running rows.
-    for j in jobs.list_jobs(limit=limit, offset=(page - 1) * limit, date_from=df, date_to=dt):
+    for j in jobs.list_jobs(limit=limit, offset=(page - 1) * limit,
+                            date_from=df, date_to=dt, status=st):
         item = public.task_list_item(j)
         item["callback_result"] = j.get("callback_result")
         item["error"] = j.get("error")

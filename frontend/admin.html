@@ -306,16 +306,29 @@ async function toggleAutoscale(){
 }
 
 /* ---------- recordings ---------- */
-let recPage=1, recLimit=25, recFrom="", recTo="";
+let recPage=1, recLimit=25, recFrom="", recTo="", recStatus="";
 async function viewRecordings(){
   el("view").innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <h2 style="margin:0">Recordings</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <select id="recStatus" onchange="applyRecFilter()" style="width:auto;padding:5px 8px">
+          <option value="">All statuses</option>
+          <option value="done">Done</option>
+          <option value="running">Processing</option>
+          <option value="queued">Queued</option>
+          <option value="error">Error</option>
+          <option value="no_speech">No speech</option>
+        </select>
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px">From <input id="recFrom" type="date" style="width:auto;padding:5px 8px"></label>
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px">To <input id="recTo" type="date" style="width:auto;padding:5px 8px"></label>
         <button class="sm" onclick="applyRecFilter()">Filter</button>
         <button class="sm ghost" onclick="clearRecFilter()">Clear</button>
+        <select id="recLimit" onchange="applyRecFilter()" style="width:auto;padding:5px 8px" title="Rows per page">
+          <option value="25">25 / page</option>
+          <option value="50">50 / page</option>
+          <option value="100">100 / page</option>
+        </select>
         <button class="ghost sm" onclick="loadTasks()">Refresh</button>
       </div>
     </div>
@@ -323,24 +336,37 @@ async function viewRecordings(){
     <div id="recpager" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
   </div>`;
   el("recFrom").value=recFrom; el("recTo").value=recTo;
+  if(el("recStatus"))el("recStatus").value=recStatus;
+  if(el("recLimit"))el("recLimit").value=String(recLimit);
   await loadTasks(); timers.push(setInterval(loadTasks,4000));
 }
-function applyRecFilter(){ recFrom=el("recFrom").value||""; recTo=el("recTo").value||""; recPage=1; loadTasks(); }
-function clearRecFilter(){ recFrom=""; recTo=""; if(el("recFrom"))el("recFrom").value=""; if(el("recTo"))el("recTo").value=""; recPage=1; loadTasks(); }
+function applyRecFilter(){
+  recFrom=el("recFrom").value||""; recTo=el("recTo").value||"";
+  recStatus=el("recStatus")?el("recStatus").value:"";
+  recLimit=el("recLimit")?(parseInt(el("recLimit").value,10)||25):25;
+  recPage=1; loadTasks();
+}
+function clearRecFilter(){
+  recFrom=""; recTo=""; recStatus="";
+  if(el("recFrom"))el("recFrom").value=""; if(el("recTo"))el("recTo").value="";
+  if(el("recStatus"))el("recStatus").value="";
+  recPage=1; loadTasks();
+}
 function recGoto(p){ recPage=Math.max(1,p); loadTasks(); }
 async function loadTasks(){
   const qs=new URLSearchParams({page:recPage,limit:recLimit});
   if(recFrom) qs.set("date_from",recFrom);
   if(recTo) qs.set("date_to",recTo);
+  if(recStatus) qs.set("status",recStatus);
   let r; try{ r=await api("/tasks?"+qs.toString()); }catch(e){ return; }
   const ts=r.items||[], total=r.total||0, pages=r.pages||1;
   if(el("recpager")) el("recpager").innerHTML = total ? `
-    <span class="muted" style="font-size:12px">${total} recording${total===1?"":"s"}${(recFrom||recTo)?" in range":""} · page ${r.page} of ${pages}</span>
+    <span class="muted" style="font-size:12px">${total} recording${total===1?"":"s"}${(recFrom||recTo||recStatus)?" (filtered)":""} · page ${r.page} of ${pages}</span>
     <div style="display:flex;gap:6px">
       <button class="sm ghost" ${r.page<=1?"disabled":""} onclick="recGoto(${r.page-1})">‹ Prev</button>
       <button class="sm ghost" ${r.page>=pages?"disabled":""} onclick="recGoto(${r.page+1})">Next ›</button>
     </div>` : "";
-  if(!ts.length){ el("tasks").innerHTML=`<p class="muted">No recordings${(recFrom||recTo)?" in this date range":" yet"}.</p>`; return; }
+  if(!ts.length){ el("tasks").innerHTML=`<p class="muted">No recordings${(recFrom||recTo||recStatus)?" match this filter":" yet"}.</p>`; return; }
   el("tasks").innerHTML=`<div class="tbl-wrap"><table><tr><th>File</th><th>Status</th><th>Summary</th><th>Analytics</th><th>Webhook</th><th>Created</th><th></th></tr>`+
     ts.map(t=>{
       const running=t.status==="running";

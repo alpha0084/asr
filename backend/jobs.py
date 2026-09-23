@@ -112,8 +112,9 @@ def get_job(jid) -> dict:
     return job
 
 
-def list_jobs(limit=None, offset=0, date_from=None, date_to=None) -> list:
-    rows = db.list_recordings(limit=limit, offset=offset, date_from=date_from, date_to=date_to)
+def list_jobs(limit=None, offset=0, date_from=None, date_to=None, status=None) -> list:
+    rows = db.list_recordings(limit=limit, offset=offset, date_from=date_from,
+                              date_to=date_to, status=status)
     with _live_lock:
         live = dict(_live)
     for r in rows:
