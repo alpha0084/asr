@@ -21,6 +21,11 @@
   input,select,textarea{width:100%;padding:9px 11px;background:var(--panel2);border:1px solid var(--line);
     border-radius:10px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
   input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  /* Make native date pickers (popup + icon) follow the panel theme instead of the ugly default. */
+  html{color-scheme:light dark}
+  input[type=date]{color-scheme:inherit;cursor:pointer}
+  input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.6;padding:2px;border-radius:5px;transition:all .12s}
+  input[type=date]::-webkit-calendar-picker-indicator:hover{opacity:1;background:var(--accent);filter:brightness(1.2)}
   label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
   button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 15px;font-size:13.5px;
     font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
@@ -343,7 +348,7 @@ async function viewRecordings(){
       <span class="rpill" id="rp_30d"   onclick="recPreset('30d')">Last 30d</span>
       <span class="rpill" id="rp_month" onclick="recPreset('month')">This month</span>
       <span class="fdiv"></span>
-      <span class="muted" style="font-size:12px">Custom</span>
+      <span class="rpill" id="rp_custom" onclick="el('recFrom').focus()" title="Pick a custom range">Custom</span>
       <input id="recFrom" type="date" style="width:auto;padding:6px 9px" onchange="applyRecFilter()" title="From">
       <span class="muted">→</span>
       <input id="recTo" type="date" style="width:auto;padding:6px 9px" onchange="applyRecFilter()" title="To">
@@ -393,7 +398,9 @@ function recPreset(kind){
 function _syncPresetHl(){
   let match="";
   for(const k of ['all','today','7d','30d','month']){ const [f,t]=_presetRange(k); if(f===recFrom&&t===recTo){match=k;break;} }
+  const custom = !match && (!!recFrom || !!recTo);   // a manual range that matches no preset
   for(const k of ['all','today','7d','30d','month']){ const e=el('rp_'+k); if(e) e.classList.toggle('active',k===match); }
+  const ce=el('rp_custom'); if(ce) ce.classList.toggle('active',custom);
 }
 function recGoto(p){ recPage=Math.max(1,p); loadTasks(); }
 async function loadTasks(){
