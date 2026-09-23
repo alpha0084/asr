@@ -178,10 +178,11 @@ def load_one(tid: str) -> dict | None:
     return _row_to_job(r) if r else None
 
 
-def _recordings_where(date_from=None, date_to=None, status=None):
+def _recordings_where(date_from=None, date_to=None, status=None, search=None):
     """Filters for the admin recordings list → (WHERE sql, params). created_at date range is
     inclusive (YYYY-MM-DD both ends); `status` matches the status column, except the special
-    value 'no_speech' which matches recordings the VAD gate found blank."""
+    value 'no_speech' which matches recordings the VAD gate found blank; `search` is a
+    case-insensitive substring match on filename or task id."""
     clauses, params = [], []
     if date_from:
         clauses.append("created_at >= %s")
@@ -195,14 +196,18 @@ def _recordings_where(date_from=None, date_to=None, status=None):
         else:
             clauses.append("status = %s")
             params.append(status)
+    if search:
+        clauses.append("(filename ILIKE %s OR id ILIKE %s)")
+        like = f"%{search}%"
+        params.extend([like, like])
     return (("WHERE " + " AND ".join(clauses)) if clauses else ""), params
 
 
 def list_recordings(limit: int | None = None, offset: int = 0,
-                    date_from=None, date_to=None, status=None) -> list:
+                    date_from=None, date_to=None, status=None, search=None) -> list:
     """Metadata only (no heavy result_json), newest first — for the admin recordings list.
-    Optional status + created_at date range + limit/offset for pagination."""
-    where, params = _recordings_where(date_from, date_to, status)
+    Optional status/search + created_at date range + limit/offset for pagination."""
+    where, params = _recordings_where(date_from, date_to, status, search)
     sql = ("SELECT id, filename, source, status, stage, summary_status, "
            "analytics_status, error, created_at, updated_at FROM recordings "
            f"{where} ORDER BY created_at DESC")
@@ -219,9 +224,9 @@ def list_recordings(limit: int | None = None, offset: int = 0,
     return rows
 
 
-def count_recordings(date_from=None, date_to=None, status=None) -> int:
-    """Total recordings matching the (optional) status + date range — for pagination."""
-    where, params = _recordings_where(date_from, date_to, status)
+def count_recordings(date_from=None, date_to=None, status=None, search=None) -> int:
+    """Total recordings matching the (optional) status/search + date range — for pagination."""
+    where, params = _recordings_where(date_from, date_to, status, search)
     with _conn() as c, c.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM recordings {where}", params)
         return int(cur.fetchone()[0])
