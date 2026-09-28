@@ -53,6 +53,29 @@ def public_result(job: dict) -> dict:
     return out
 
 
+# Top-level keys renamed for the WEBHOOK payload only — rhymecall consumes camelCase. The shared
+# public_result stays snake_case for the public GET API + admin panel; nested objects
+# (summary/analytics internals, speaker_wise items) are left as-is.
+_WEBHOOK_KEY_MAP = {
+    "job_id": "jobId",
+    "audio_path": "audioPath",
+    "translated_to": "translatedTo",
+    "duration_seconds": "durationSeconds",
+    "processing_seconds": "processingSeconds",
+    "speaker_wise": "speakerWise",
+    "full_text": "fullText",
+    "full_text_translated": "fullTextTranslated",
+    "no_speech": "noSpeech",
+    "speech_seconds": "speechSeconds",
+}
+
+
+def webhook_result(job: dict) -> dict:
+    """The webhook `data` payload — `public_result` with camelCase top-level keys (the contract with
+    rhymecall). Only the webhook uses this; the public/admin endpoints keep `public_result` as-is."""
+    return {_WEBHOOK_KEY_MAP.get(k, k): v for k, v in public_result(job).items()}
+
+
 def status_result(job: dict) -> dict:
     """Lightweight polling payload: progress + which stages are ready."""
     r = job.get("result") or {}

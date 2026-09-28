@@ -64,7 +64,7 @@ def emit(job: dict, event_type: str):
         return
     if event_type not in (target.get("events") or []):
         return
-    payload = {"event": event_type, "task_id": tid, "data": public.public_result(job)}
+    payload = {"event": event_type, "taskId": tid, "data": public.webhook_result(job)}
     db.add_webhook_event(uuid.uuid4().hex[:16], tid, event_type, target["url"], payload, _now())
     start()
     _wake.set()
