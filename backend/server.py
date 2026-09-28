@@ -24,7 +24,7 @@ translation, summary, and QA analytics. Everything runs on-device.
 ## Task flow (Tasks API)
 
 1. **`POST /api/v1/tasks`** — submit a recording (URL). Runs transcribe + diarize
-   + translate. Returns a **`task_id`** immediately (status `queued`).
+   + translate. Returns a **`taskId`** immediately (status `queued`).
 2. **`GET /api/v1/tasks/{id}`** — poll. Watch `status` go `queued → running → done`,
    with `stage` (Transcribing, Diarizing, …) and `detail` (e.g. `2:31 / 5:02`).
    `transcript_ready` flips true when step 3 is available.
@@ -141,12 +141,12 @@ def index():
 @app.post("/api/v1/tasks", status_code=202, tags=["Tasks API"], dependencies=_AUTH,
           response_model=schemas.CreateTaskResponse, responses=_ERRORS,
           summary="Enqueue a recording",
-          response_description="Task accepted; poll `status_url`.")
+          response_description="Task accepted; poll `statusUrl`.")
 def create_task(req: schemas.TranscribeRequest, key: str | None = Depends(require_api_key)):
     """Queue a recording for **transcribe + diarize + translate**.
 
     Summary and QA analytics are **not** run here — call `/summarize` and
-    `/analyze` afterward. Returns a `task_id` used for every follow-up call.
+    `/analyze` afterward. Returns a `taskId` used for every follow-up call.
     """
     # "auto" → use the admin-selected default model (settings.whisper_model()).
     model = None if req.engine.strip().lower() in ("auto", "") else req.engine.strip()
@@ -160,7 +160,7 @@ def create_task(req: schemas.TranscribeRequest, key: str | None = Depends(requir
         req.audio_path, name, model=model, language=language, speakers=req.speakers,
         target_language=target, include_summary=False, include_analytics=False,
         callback_url=req.callback_url, api_key_id=key_id)
-    return {"task_id": tid, "status": "queued", "status_url": f"/api/v1/tasks/{tid}",
+    return {"taskId": tid, "status": "queued", "statusUrl": f"/api/v1/tasks/{tid}",
             "message": "queued"}
 
 
@@ -202,8 +202,8 @@ def task_summarize(tid: str):
     `GET /api/v1/tasks/{id}/summary` until `summary_status` is `done`."""
     if not jobs.trigger_stage(tid, "summary"):
         raise HTTPException(409, "task not ready (transcription must finish first)")
-    return {"task_id": tid, "summary_status": "queued",
-            "result_url": f"/api/v1/tasks/{tid}/summary"}
+    return {"taskId": tid, "summaryStatus": "queued",
+            "resultUrl": f"/api/v1/tasks/{tid}/summary"}
 
 
 @app.get("/api/v1/tasks/{tid}/summary", tags=["Tasks API"], dependencies=_AUTH,
@@ -225,8 +225,8 @@ def task_analyze(tid: str):
     poll `GET /api/v1/tasks/{id}/analytics` until `analytics_status` is `done`."""
     if not jobs.trigger_stage(tid, "analytics"):
         raise HTTPException(409, "task not ready (transcription must finish first)")
-    return {"task_id": tid, "analytics_status": "queued",
-            "result_url": f"/api/v1/tasks/{tid}/analytics"}
+    return {"taskId": tid, "analyticsStatus": "queued",
+            "resultUrl": f"/api/v1/tasks/{tid}/analytics"}
 
 
 @app.get("/api/v1/tasks/{tid}/analytics", tags=["Tasks API"], dependencies=_AUTH,

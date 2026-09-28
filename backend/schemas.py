@@ -34,9 +34,9 @@ class TranscribeRequest(BaseModel):
 
 # ------------------------------- responses -------------------------------
 class CreateTaskResponse(BaseModel):
-    task_id: str = Field(description="Use this id in every follow-up call.")
+    taskId: str = Field(description="Use this id in every follow-up call.")
     status: str = Field(examples=["queued"])
-    status_url: str = Field(description="Relative URL to poll for status.")
+    statusUrl: str = Field(description="Relative URL to poll for status.")
     message: str
 
 
@@ -143,10 +143,10 @@ class TaskListItem(BaseModel):
 
 
 class StageQueued(BaseModel):
-    task_id: str
-    summary_status: str | None = None
-    analytics_status: str | None = None
-    result_url: str
+    taskId: str
+    summaryStatus: str | None = None
+    analyticsStatus: str | None = None
+    resultUrl: str
 
 
 class ErrorResponse(BaseModel):

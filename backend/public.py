@@ -53,27 +53,26 @@ def public_result(job: dict) -> dict:
     return out
 
 
-# Top-level keys renamed for the WEBHOOK payload only — rhymecall consumes camelCase. The shared
-# public_result stays snake_case for the public GET API + admin panel; nested objects
-# (summary/analytics internals, speaker_wise items) are left as-is.
-_WEBHOOK_KEY_MAP = {
-    "job_id": "jobId",
-    "audio_path": "audioPath",
-    "translated_to": "translatedTo",
-    "duration_seconds": "durationSeconds",
-    "processing_seconds": "processingSeconds",
-    "speaker_wise": "speakerWise",
-    "full_text": "fullText",
-    "full_text_translated": "fullTextTranslated",
-    "no_speech": "noSpeech",
-    "speech_seconds": "speechSeconds",
-}
+def _to_camel(key: str) -> str:
+    """snake_case → camelCase for a single key (leaves already-camel/plain keys untouched)."""
+    head, *rest = key.split("_")
+    return head + "".join(word[:1].upper() + word[1:] for word in rest) if rest else key
+
+
+def _camelize(value):
+    """Recursively camelCase every dict key (through nested dicts + lists)."""
+    if isinstance(value, dict):
+        return {_to_camel(k): _camelize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_camelize(v) for v in value]
+    return value
 
 
 def webhook_result(job: dict) -> dict:
-    """The webhook `data` payload — `public_result` with camelCase top-level keys (the contract with
-    rhymecall). Only the webhook uses this; the public/admin endpoints keep `public_result` as-is."""
-    return {_WEBHOOK_KEY_MAP.get(k, k): v for k, v in public_result(job).items()}
+    """The webhook `data` payload — `public_result` fully camelCased (top level + nested
+    summary/analytics/speaker_wise/speakers), the contract with rhymecall. Only the webhook uses
+    this; the public GET API + admin panel keep `public_result` snake_case unchanged."""
+    return _camelize(public_result(job))
 
 
 def status_result(job: dict) -> dict:
