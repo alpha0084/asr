@@ -10,7 +10,7 @@ from pathlib import Path
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 
@@ -197,10 +197,21 @@ def task_transcript(tid: str):
                      "description": "Transcription not finished yet"}},
           summary="Run the summary (async)",
           response_description="Queued; poll `GET /summary` for `summary_status: done`.")
-def task_summarize(tid: str):
+def task_summarize(tid: str, req: schemas.SummarizeRequest | None = Body(None)):
     """Kick off the conversation summary. It runs in the background; poll
-    `GET /api/v1/tasks/{id}/summary` until `summary_status` is `done`."""
-    if not jobs.trigger_stage(tid, "summary"):
+    `GET /api/v1/tasks/{id}/summary` until `summary_status` is `done`.
+
+    Optionally send a per-tenant `summarySpec` to override the ASR default for this
+    call; omit the body to use the configured default."""
+    overrides = {}
+    if req and req.summarySpec:
+        s = req.summarySpec
+        overrides["summary_spec"] = {
+            "outcome_options": s.outcomeOptions,
+            "sentiment": s.sentiment,
+            "custom_fields": [{"key": f.key, "prompt": f.prompt} for f in s.customFields],
+        }
+    if not jobs.trigger_stage(tid, "summary", overrides=overrides or None):
         raise HTTPException(409, "task not ready (transcription must finish first)")
     return {"taskId": tid, "summaryStatus": "queued",
             "resultUrl": f"/api/v1/tasks/{tid}/summary"}
@@ -220,10 +231,18 @@ def task_summary(tid: str):
                      "description": "Transcription not finished yet"}},
           summary="Run the QA analytics (async)",
           response_description="Queued; poll `GET /analytics` for `analytics_status: done`.")
-def task_analyze(tid: str):
-    """Kick off the QA scorecard (5 checkpoint categories). Runs in the background;
-    poll `GET /api/v1/tasks/{id}/analytics` until `analytics_status` is `done`."""
-    if not jobs.trigger_stage(tid, "analytics"):
+def task_analyze(tid: str, req: schemas.AnalyzeRequest | None = Body(None)):
+    """Kick off the QA scorecard. Runs in the background; poll
+    `GET /api/v1/tasks/{id}/analytics` until `analytics_status` is `done`.
+
+    Optionally send a per-tenant `scorecard` (+ `scorecardVersion`) to grade this
+    call against that rubric; omit the body to use the ASR's configured default."""
+    overrides = {}
+    if req and req.scorecard:
+        overrides["scorecard"] = [c.model_dump(exclude_none=True) for c in req.scorecard]
+        if req.scorecardVersion is not None:
+            overrides["scorecard_version"] = req.scorecardVersion
+    if not jobs.trigger_stage(tid, "analytics", overrides=overrides or None):
         raise HTTPException(409, "task not ready (transcription must finish first)")
     return {"taskId": tid, "analyticsStatus": "queued",
             "resultUrl": f"/api/v1/tasks/{tid}/analytics"}

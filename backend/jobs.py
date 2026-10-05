@@ -87,14 +87,20 @@ def create_job(src, filename, model=None, language=None, speakers=None, target_l
     return jid
 
 
-def trigger_stage(jid, name) -> bool:
-    """Queue an on-demand stage (summary|analytics) on a finished recording."""
+def trigger_stage(jid, name, overrides=None) -> bool:
+    """Queue an on-demand stage (summary|analytics) on a finished recording.
+
+    `overrides` (optional) carries a per-tenant rubric for this run \u2014 persisted into
+    the recording's request_params so the claiming worker picks it up; omit to use
+    the ASR's configured default."""
     job = db.load_one(jid)
     if not job or job.get("status") != "done" or not job.get("result"):
         return False
     col = "summary_status" if name == "summary" else "analytics_status"
     if job.get(col) == "running":
         return True
+    if overrides:
+        db.merge_request_params(jid, overrides)
     db.set_recording(jid, **{col: "queued"})
     start()
     _wake.set()
@@ -395,10 +401,13 @@ def _run_stage(claim, stage):
     _set_live(jid, stage=("Summarizing" if stage == "summary" else "Analyzing"))
     try:
         if stage == "summary":
-            runner.add_summary(result)
+            runner.add_summary(result, summary_spec=p.get("summary_spec"))
             params, event = result.get("summary_params"), "summarized"
         else:
-            runner.add_analytics(result, on_progress=lambda d: _set_live(jid, detail=d))
+            runner.add_analytics(
+                result, scorecard=p.get("scorecard"),
+                scorecard_version=p.get("scorecard_version"),
+                on_progress=lambda d: _set_live(jid, detail=d))
             params, event = result.get("analytics_params"), "analyzed"
         db.set_recording(jid, result=result, **{f"{stage}_status": "done"})
         _clear_live(jid)

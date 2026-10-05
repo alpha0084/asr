@@ -502,6 +502,18 @@ def get_request_params(tid: str) -> dict:
     return (r[0] if r and r[0] else {}) or {}
 
 
+def merge_request_params(tid: str, patch: dict):
+    """Shallow-merge `patch` into a recording's request_params (e.g. a per-tenant
+    rubric supplied when a stage is triggered). Row-locked read-modify-write."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT request_params FROM recordings WHERE id=%s FOR UPDATE", (tid,))
+        row = cur.fetchone()
+        current = (row[0] if row and row[0] else {}) or {}
+        current.update(patch or {})
+        cur.execute("UPDATE recordings SET request_params=%s, updated_at=%s WHERE id=%s",
+                    (Json(current), _now(), tid))
+
+
 def active_key_hashes() -> set:
     with _conn() as c, c.cursor() as cur:
         cur.execute("SELECT key_hash FROM api_keys WHERE revoked_at IS NULL")

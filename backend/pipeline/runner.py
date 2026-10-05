@@ -204,18 +204,21 @@ def transcribe_only(src, model=None, language=None, speakers=None,
     return result
 
 
-def add_summary(result: dict, on_stage=None) -> dict:
-    """Run the conversation summary on an existing transcript result (in place)."""
+def add_summary(result: dict, summary_spec: dict | None = None, on_stage=None) -> dict:
+    """Run the conversation summary on an existing transcript result (in place).
+
+    `summary_spec` (optional) is a per-tenant override; omit to use the ASR default."""
     if on_stage:
         on_stage("Summarizing")
     try:
-        summary = summarize.summarize(result["turns"])
+        summary = summarize.summarize(result["turns"], cfg=summary_spec)
     except Exception as e:
         summary = {"error": f"{type(e).__name__}: {e}"}
     result["summary"] = summary
     result["summary_params"] = {
         "ollama_model": settings.summary_model(),
         "ollama_host": os.environ.get("OLLAMA_HOST", ""),
+        "summary_spec_source": "tenant" if summary_spec else "default",
     }
     if summary.get("roles"):
         result["roles"] = summary["roles"]
@@ -223,7 +226,8 @@ def add_summary(result: dict, on_stage=None) -> dict:
     return result
 
 
-def add_analytics(result: dict, on_stage=None, on_progress=None) -> dict:
+def add_analytics(result: dict, scorecard=None, scorecard_version=None,
+                  on_stage=None, on_progress=None) -> dict:
     """Run the QA scorecard on an existing transcript result (in place)."""
     if on_stage:
         on_stage("Analyzing")
@@ -238,6 +242,7 @@ def add_analytics(result: dict, on_stage=None, on_progress=None) -> dict:
     try:
         qa = analyze.analyze(
             result["turns"], roles=roles,
+            scorecard=scorecard, scorecard_version=scorecard_version,
             on_progress=(lambda i, n, cat: on_progress(f"category {i}/{n}: {cat}")) if on_progress else None,
         )
     except Exception as e:
@@ -246,7 +251,8 @@ def add_analytics(result: dict, on_stage=None, on_progress=None) -> dict:
     result["analytics_params"] = {
         "ollama_model": settings.analytics_model(),
         "ollama_host": os.environ.get("OLLAMA_HOST", ""),
-        "scorecard_categories": len(settings.scorecard() or []),
+        "scorecard_categories": len(scorecard if scorecard else (settings.scorecard() or [])),
+        "scorecard_source": "tenant" if scorecard else "default",
     }
     _resave(result)
     return result
