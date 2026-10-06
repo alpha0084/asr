@@ -25,15 +25,18 @@ ASR_BACKEND = os.getenv("ASR_BACKEND", "mlx").strip()
 DIARIZE_DEVICE = os.getenv("DIARIZE_DEVICE", "cpu").strip()
 
 # Speaker separation strategy:
-#   "hybrid"   -> acoustic word-level turns (pyannote) PLUS one global LLM call to
-#                 name the two clusters Agent/Customer. Clean turn grouping without
-#                 per-line wobble, and roles populated. Recommended default.
 #   "llm"      -> split the transcript into sentences (word-timestamp anchored) and
-#                 label each line agent/customer with the LLM. Finest splits but the
-#                 per-line labels can wobble on garbled/small-talk audio.
+#                 label each line agent/customer with the LLM. DEFAULT: on mono/8kHz
+#                 call-center recordings pyannote mis-clusters similar phone voices
+#                 (it merges a two-way exchange onto one speaker), so sentence-level
+#                 LLM labeling gives correct turn boundaries AND roles. Per-line
+#                 labels can still wobble on garbled small-talk.
+#   "hybrid"   -> acoustic word-level turns (pyannote) PLUS one global LLM call to
+#                 name the two clusters Agent/Customer. Better on clean/stereo audio
+#                 where acoustic separation is reliable; under-segments mono phone calls.
 #   "acoustic" -> pyannote + word-level overlap only; generic Speaker 1/2, no roles.
-# hybrid/llm fall back to acoustic automatically if the LLM step errors.
-SPEAKER_MODE = os.getenv("SPEAKER_MODE", "hybrid").strip().lower()
+# llm/hybrid fall back to acoustic automatically if the LLM step errors.
+SPEAKER_MODE = os.getenv("SPEAKER_MODE", "llm").strip().lower()
 
 # LLM speaker mode: also break an utterance when the silence gap between two
 # consecutive words exceeds this many seconds — not just at sentence punctuation.

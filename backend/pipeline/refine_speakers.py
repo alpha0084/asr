@@ -20,28 +20,32 @@ _OPTS = {"num_ctx": 16384}             # single-pass room for long calls
 
 SYSTEM = (
     "You are an expert call-center analyst. You label who speaks each line of a "
-    "two-person sales/support phone call whose transcript has NO speaker labels. "
-    "There are exactly TWO speakers and each stays the SAME person for the whole "
-    "call.\n\n"
-    "AGENT — the outbound caller / rep. Near the start they introduce themselves "
-    "and their company ('this is X', 'our company is a brokerage firm', 'calling "
-    "from Y'). They drive the call: pitch the product, explain benefits, and ask "
-    "qualifying questions ('what's your job?', 'have you traded before?', 'what's "
-    "your monthly salary?', 'which emirate do you live in?').\n"
-    "CUSTOMER — the person who was called. They answer those questions, describe "
-    "their own situation ('I do a spare-part job', 'I lost money in the market', "
-    "'I'm not interested'), and ask about the product/company/price/office.\n\n"
-    "How to decide each line:\n"
-    "1. TURN-TAKING: consecutive lines are USUALLY different speakers. A question "
-    "on one line is answered by the OTHER speaker on the next line. Do not put a "
-    "question and its answer on the same speaker.\n"
-    "2. ANCHOR on the opening self-introduction to fix which role is which, then "
-    "stay globally consistent — the agent is ONE fixed person the whole call.\n"
-    "3. FILLERS / backchannels ('yeah', 'okay', 'hmm', 'yes yes', 'no problem', "
-    "'right') belong to whoever is listening at that moment — infer from context; "
-    "do NOT dump them all on one speaker.\n"
-    "4. Humans interrupt, repeat, use slang and code-switch (Hindi/English) — read "
-    "the intent, not just keywords.\n"
+    "two-person OUTBOUND phone call (a company called a customer) whose transcript "
+    "has NO speaker labels. There are exactly TWO speakers and each stays the SAME "
+    "person for the whole call.\n\n"
+    "AGENT — the caller / company rep. They verify who they reached, identify "
+    "themselves or their company, state the PURPOSE of the call and DRIVE it. The "
+    "purpose can be ANY of: a sales pitch, a support/service follow-up, a "
+    "COLLECTIONS or payment reminder (EMI due, credit-card bill, loan, 'last date', "
+    "amount owed), an appointment, or an identity/KYC check. They ask the questions "
+    "and tell the other party what is due / offered / required.\n"
+    "CUSTOMER — the person who was called. They confirm their identity ('yes, "
+    "speaking', 'this is <name>'), answer the agent's questions, describe their own "
+    "situation, and ask about the amount / due date / how to pay / the product.\n\n"
+    "ANCHOR the opening of an OUTBOUND call: the phone is answered by the CUSTOMER, "
+    "so the first 'Hello' is the CUSTOMER; the caller then asks 'am I speaking with "
+    "<name>?' — that line is the AGENT; the reply 'yes, you are speaking with "
+    "<name>' is the CUSTOMER. Fix the two roles from this exchange, then stay "
+    "globally consistent — each role is ONE fixed person the whole call.\n\n"
+    "DECIDE EACH LINE BY CONTENT AND INTENT FIRST: who is verifying / demanding "
+    "payment / asking qualifying questions / driving = AGENT; who is confirming / "
+    "answering / describing their own situation = CUSTOMER. A speaker OFTEN says "
+    "SEVERAL lines in a row (a greeting then a question; a demand then its detail) — "
+    "do NOT force strict agent/customer alternation; use turn-taking only as a "
+    "tie-breaker when content is neutral (a question is usually answered by the "
+    "OTHER speaker next). Backchannels ('yeah', 'okay', 'hmm', 'ji', 'haan', "
+    "'right') belong to whoever is listening at that moment. Humans interrupt, "
+    "repeat, and code-switch (Hindi/English) — read the intent, not just keywords.\n"
     "Return ONLY valid JSON."
 )
 
@@ -55,10 +59,15 @@ Use only "agent" or "customer". Every line number must appear exactly once."""
 
 
 _ORIENT_SYSTEM = (
-    "You identify the AGENT in a phone call. The AGENT is the outbound caller — a "
-    "sales/support rep from a company who introduces themselves and their company, "
-    "pitches a product/service, and asks qualifying questions. The other person is "
-    "the CUSTOMER who received the call. Return only valid JSON."
+    "You identify the AGENT in a two-person OUTBOUND phone call (a company called a "
+    "customer). The AGENT is the caller / company rep: they verify who they reached "
+    "('am I speaking with <name>?'), identify themselves or their company, and state "
+    "the PURPOSE and DRIVE the call — a sales pitch, a support follow-up, a "
+    "COLLECTIONS / payment reminder (EMI, credit-card bill, loan, 'last date', amount "
+    "due), an appointment, or a KYC check — asking the questions and stating what is "
+    "due / offered / required. The CUSTOMER is the person who was called: they confirm "
+    "their identity, answer, and ask about the amount / due date / how to pay. Return "
+    "only valid JSON."
 )
 
 _ORIENT_PROMPT = """A phone call has two speakers.
@@ -69,7 +78,8 @@ SPEAKER A said (sample):
 SPEAKER B said (sample):
 {b}
 
-Which speaker is the AGENT (the caller who introduces themselves/company and pitches)?
+Which speaker is the AGENT — the caller who verifies the other's identity, states the
+purpose, and drives the call with questions/demands (sales, collections, support or KYC)?
 Return JSON exactly: {{"agent": "A"}} or {{"agent": "B"}}"""
 
 
