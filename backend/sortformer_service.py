@@ -60,23 +60,36 @@ def _ov(a0, a1, b0, b1):
     return max(0.0, min(a1, b1) - max(a0, b0))
 
 
-def _stitch(local, prev_tail, next_gid):
-    """Map a window's local speaker ids -> global ids, by max overlap with the previous window's
-    already-global segments in the shared overlap region. New (unmatched) speakers get fresh ids."""
-    mapping = {}
-    for lspk in sorted({s["speaker"] for s in local}):
-        best, bov = None, 0.0
-        for g in prev_tail:
-            for s in local:
-                if s["speaker"] != lspk:
-                    continue
-                o = _ov(s["start"], s["end"], g["start"], g["end"])
-                if o > bov:
-                    bov, best = o, g["speaker"]
-        if best is None:
-            best = "speaker_%d" % next_gid[0]
+def _stitch(local, prev_tail, next_gid, known):
+    """Map a window's local speaker ids -> global ids. Greedy bipartite match on overlap with the
+    previous window's global segments; a local speaker with no overlap is assigned to an UNUSED known
+    global (e.g. the other party who was just silent at the boundary) before ever minting a new id —
+    this stops one speaker being re-created as a spurious new id across windows ("Speaker 3")."""
+    lspks = sorted({s["speaker"] for s in local})
+    gspks = sorted({g["speaker"] for g in prev_tail})
+    ov = {}
+    for l in lspks:
+        for g in gspks:
+            tot = sum(_ov(s["start"], s["end"], gg["start"], gg["end"])
+                      for s in local if s["speaker"] == l
+                      for gg in prev_tail if gg["speaker"] == g)
+            if tot > 0:
+                ov[(l, g)] = tot
+    mapping, used = {}, set()
+    for _, l, g in sorted(((v, l, g) for (l, g), v in ov.items()), reverse=True):
+        if l not in mapping and g not in used:
+            mapping[l] = g
+            used.add(g)
+    free = [g for g in known if g not in used]   # existing globals not yet claimed this window
+    for l in lspks:
+        if l in mapping:
+            continue
+        if free:
+            mapping[l] = free.pop(0)
+        else:
+            mapping[l] = "speaker_%d" % next_gid[0]
             next_gid[0] += 1
-        mapping[lspk] = best
+        used.add(mapping[l])
     return mapping
 
 
@@ -87,7 +100,7 @@ def diarize(audio_path):
         if dur <= WINDOW + OVERLAP:
             return _diarize_file(audio_path)  # short: one shot (fast path, unchanged)
 
-        out, prev_tail, next_gid = [], [], [0]
+        out, prev_tail, next_gid, known = [], [], [0], set()
         w0 = 0.0
         while w0 < dur:
             w1 = min(w0 + WINDOW, dur)
@@ -107,7 +120,8 @@ def diarize(audio_path):
                     mapping.setdefault(s["speaker"], "speaker_%d" % len(mapping))
                 next_gid[0] = len(mapping)
             else:                          # later windows: map to prior ids via the overlap region
-                mapping = _stitch(local, prev_tail, next_gid)
+                mapping = _stitch(local, prev_tail, next_gid, known)
+            known.update(mapping.values())
             remapped = [{"start": s["start"], "end": s["end"], "speaker": mapping[s["speaker"]]}
                         for s in local]
             emit_from = 0.0 if w0 == 0.0 else (w0 + OVERLAP)  # avoid duplicating prev window's region

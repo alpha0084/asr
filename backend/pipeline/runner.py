@@ -149,7 +149,8 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             for t in raw_turns:
                 by_speaker.setdefault(t["speaker"], []).append(t["text"])
             try:
-                mapping = refine_speakers.orient(by_speaker)   # {raw: Agent|Customer|Speaker N}
+                # pass ordered turns so orient can read the opening sequence (turn-taking), not just blobs
+                mapping = refine_speakers.orient(by_speaker, turns=raw_turns)   # {raw: Agent|Customer|Speaker N}
             except Exception as e:
                 log.warning("speaker orientation failed (%s) — using generic labels", e)
                 mapping = {}

@@ -83,11 +83,25 @@ purpose, and drives the call with questions/demands (sales, collections, support
 Return JSON exactly: {{"agent": "A"}} or {{"agent": "B"}}"""
 
 
-def orient(by_speaker: dict) -> dict:
-    """Map pyannote cluster ids -> 'Agent'/'Customer' with ONE global LLM decision.
+# Preferred: show the OPENING of the call IN ORDER (A/B), so the model can use turn-taking — who
+# answered first, who verified identity — not just two aggregated blobs. Role is most determinable here.
+_ORIENT_SEQ_PROMPT = """The opening of a two-person OUTBOUND phone call, in order. A and B are the
+two speakers:
 
-    by_speaker: {speaker_id: [texts]}. Reliable because the model only decides which
-    of two aggregated speakers is the agent — not per-line labeling.
+{convo}
+
+On an outbound call the CUSTOMER answers first (the first "Hello"); the AGENT is the caller who then
+verifies identity ("am I speaking with <name>?"), names themselves/their company, states the purpose,
+and drives the call (sales / collections / support / KYC). The CUSTOMER confirms identity and answers.
+Which speaker is the AGENT? Return JSON exactly: {{"agent": "A"}} or {{"agent": "B"}}"""
+
+
+def orient(by_speaker: dict, turns: list | None = None, opening: int = 16) -> dict:
+    """Map cluster ids -> 'Agent'/'Customer' with ONE global LLM decision.
+
+    by_speaker: {speaker_id: [texts]}. `turns` (optional, ordered [{speaker,text,...}]) lets us show the
+    LLM the OPENING of the call IN ORDER so it can use turn-taking (who answered first, who verified
+    identity) rather than two unordered blobs — far stronger role signal. Falls back to blobs otherwise.
     """
     ranked = sorted(by_speaker.items(), key=lambda kv: -sum(len(t) for t in kv[1]))
     if not ranked:
@@ -96,11 +110,23 @@ def orient(by_speaker: dict) -> dict:
         return {ranked[0][0]: "Agent"}
 
     a_id, b_id = ranked[0][0], ranked[1][0]
-    a_txt = " ".join(by_speaker[a_id])[:1500]
-    b_txt = " ".join(by_speaker[b_id])[:1500]
+    prompt = None
+    if turns:
+        lines = []
+        for t in turns:
+            spk = t.get("speaker")
+            lab = "A" if spk == a_id else ("B" if spk == b_id else None)
+            if lab:
+                lines.append("%s: %s" % (lab, (t.get("text") or "").strip()))
+            if len(lines) >= opening:
+                break
+        if lines:
+            prompt = _ORIENT_SEQ_PROMPT.format(convo="\n".join(lines))
+    if prompt is None:   # no ordered turns -> aggregated-blob fallback
+        prompt = _ORIENT_PROMPT.format(a=" ".join(by_speaker[a_id])[:1500],
+                                       b=" ".join(by_speaker[b_id])[:1500])
     try:
-        out = llm.chat_json(_ORIENT_PROMPT.format(a=a_txt, b=b_txt),
-                            system=_ORIENT_SYSTEM, options=_OPTS,
+        out = llm.chat_json(prompt, system=_ORIENT_SYSTEM, options=_OPTS,
                             model=settings.diarize_model())
         agent = str(out.get("agent", "A")).strip().upper()
     except Exception:
