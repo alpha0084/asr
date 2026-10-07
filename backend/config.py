@@ -25,17 +25,19 @@ ASR_BACKEND = os.getenv("ASR_BACKEND", "mlx").strip()
 DIARIZE_DEVICE = os.getenv("DIARIZE_DEVICE", "cpu").strip()
 
 # Speaker separation strategy:
-#   "llm"      -> split the transcript into sentences (word-timestamp anchored) and
-#                 label each line agent/customer with the LLM. DEFAULT: on mono/8kHz
-#                 call-center recordings pyannote mis-clusters similar phone voices
-#                 (it merges a two-way exchange onto one speaker), so sentence-level
-#                 LLM labeling gives correct turn boundaries AND roles. Per-line
-#                 labels can still wobble on garbled small-talk.
-#   "hybrid"   -> acoustic word-level turns (pyannote) PLUS one global LLM call to
-#                 name the two clusters Agent/Customer. Better on clean/stereo audio
-#                 where acoustic separation is reliable; under-segments mono phone calls.
+#   "sortformer" -> NeMo Sortformer acoustic diarization (warm service, isolated .venv-nemo) + the same
+#                 word-overlap assembly + one global LLM role-naming as "hybrid". BEST on mono/8kHz phone
+#                 audio: it separates speakers acoustically, so garbled Hinglish text can't fool it (bench:
+#                 ~75% role accuracy vs ~42% for "llm" on the hard collections call). Requires the warm
+#                 Sortformer service (start-sortformer.sh); if it's down this falls back to pyannote.
+#   "llm"      -> split the transcript into sentences (word-timestamp anchored) and label each line
+#                 agent/customer with the LLM. DEFAULT (service-free): on mono calls pyannote mis-clusters
+#                 similar voices, so sentence-level LLM labeling gives better turns/roles than pyannote.
+#                 Per-line labels can wobble on garbled small-talk — "sortformer" fixes that when enabled.
+#   "hybrid"   -> acoustic word-level turns (pyannote) PLUS one global LLM call to name the two clusters.
+#                 Better on clean/stereo audio; under-segments mono phone calls.
 #   "acoustic" -> pyannote + word-level overlap only; generic Speaker 1/2, no roles.
-# llm/hybrid fall back to acoustic automatically if the LLM step errors.
+# sortformer/llm/hybrid fall back to acoustic automatically if the LLM/service step errors.
 SPEAKER_MODE = os.getenv("SPEAKER_MODE", "llm").strip().lower()
 
 # LLM speaker mode: also break an utterance when the silence gap between two

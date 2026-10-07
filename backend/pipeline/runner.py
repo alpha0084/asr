@@ -18,7 +18,7 @@ from ..config import (AUDIO_CLEANUP, AUDIO_CLEANUP_FILTERS, DATA_DIR,
                       VAD_GATE_ENABLED)
 from ..utils import fmt_ts, speaker_label
 from . import (analyze, assemble, diarize, ingest, preprocess, refine_speakers,
-               summarize, transcribe, translate, vad)
+               sortformer_client, summarize, transcribe, translate, vad)
 
 log = logging.getLogger(__name__)
 
@@ -123,11 +123,19 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             log.warning("LLM speaker labeling failed (%s) — falling back to acoustic", e)
             turns = None
 
-    # Modes "hybrid" and "acoustic" (also the fallback for "llm"): pyannote + word-
-    # level overlap. "hybrid" then names the clusters Agent/Customer with ONE global
-    # LLM decision — no per-line wobble.
+    # Modes "sortformer", "hybrid" and "acoustic" (also the fallback for "llm"): acoustic diarization +
+    # word-level overlap. "sortformer" uses the warm NeMo Sortformer service (best on mono phone audio);
+    # "hybrid"/"acoustic" use pyannote. "sortformer"/"hybrid" then name the clusters Agent/Customer with
+    # ONE global LLM decision — no per-line wobble.
     if turns is None:
-        dia = diarize.diarize(waveform, sr, num_speakers=speakers)
+        dia = None
+        if spk_mode == "sortformer":
+            try:
+                dia = sortformer_client.diarize(str(wav))
+            except Exception as e:
+                log.warning("sortformer service unavailable (%s) — falling back to pyannote", e)
+        if dia is None:
+            dia = diarize.diarize(waveform, sr, num_speakers=speakers)
         stage("Assembling")
         segs = assemble.assign_speakers(tr["segments"], dia)
         raw_turns = assemble.build_turns(segs)
@@ -136,7 +144,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
         label_map: dict = {}
         name_of = lambda raw: speaker_label(raw, label_map)   # default: Speaker 1/2/…
 
-        if spk_mode == "hybrid":
+        if spk_mode in ("hybrid", "sortformer"):
             by_speaker: dict = {}
             for t in raw_turns:
                 by_speaker.setdefault(t["speaker"], []).append(t["text"])
