@@ -111,6 +111,13 @@ def _transcribe_faster(waveform, sr, name, language, on_progress, device="cpu"):
     segments, info = model.transcribe(
         waveform, language=language, task="transcribe",
         word_timestamps=True, vad_filter=True, beam_size=5,
+        # Hallucination guards (validated on noisy Hinglish phone audio): drop repetition loops and
+        # very-low-confidence segments, and skip long silences that seed hallucinated trailing text —
+        # without turning off condition_on_previous_text (that made output WORSE in testing).
+        compression_ratio_threshold=2.2,     # default 2.4 — trim gzip-compressible repetition loops
+        log_prob_threshold=-0.8,             # default -1.0 — drop very-low-confidence segments
+        no_speech_threshold=0.6,
+        hallucination_silence_threshold=2.0,  # skip >2s silences that seed junk tails (needs word ts)
     )
     total = getattr(info, "duration", 0) or (len(waveform) / sr)
     segs = []
