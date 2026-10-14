@@ -32,6 +32,55 @@ class TranscribeRequest(BaseModel):
         None, description="Pin the number of speakers (e.g. `2` for a 1:1 call). Omit to auto-detect.")
 
 
+class SummaryCustomFieldIn(BaseModel):
+    """One extra field the summary should extract."""
+    model_config = ConfigDict(extra="ignore")
+    key: str
+    prompt: str = ""
+
+
+class SummarySpecIn(BaseModel):
+    """Per-tenant summary configuration, sent inline on `/summarize`."""
+    model_config = ConfigDict(extra="ignore")
+    outcomeOptions: list[str] = Field(default_factory=list)
+    sentiment: bool = True
+    customFields: list[SummaryCustomFieldIn] = Field(default_factory=list)
+
+
+class SummarizeRequest(BaseModel):
+    """Optional body for `/summarize`. Omit to use the ASR's configured default."""
+    model_config = ConfigDict(extra="ignore")
+    summarySpec: SummarySpecIn | None = Field(
+        None, description="Per-tenant summary spec. Omit to use the ASR default.")
+
+
+class ScorecardCheckpointIn(BaseModel):
+    """A single checkpoint within a category."""
+    model_config = ConfigDict(extra="ignore")
+    id: str | None = None
+    name: str
+    weight: float = 1.0
+    guidance: str | None = Field(None, description="What to look for \u2014 injected into the prompt.")
+
+
+class ScorecardCategoryIn(BaseModel):
+    """A scorecard category and its checkpoints."""
+    model_config = ConfigDict(extra="ignore")
+    id: str | None = None
+    category: str
+    weight: float = 1.0
+    checkpoints: list[ScorecardCheckpointIn] = Field(default_factory=list)
+
+
+class AnalyzeRequest(BaseModel):
+    """Optional body for `/analyze`. Omit to use the ASR's configured default scorecard."""
+    model_config = ConfigDict(extra="ignore")
+    scorecard: list[ScorecardCategoryIn] | None = Field(
+        None, description="Per-tenant rubric to grade this call against.")
+    scorecardVersion: int | None = Field(
+        None, description="Version stamp recorded on the result for traceability.")
+
+
 # ------------------------------- responses -------------------------------
 class CreateTaskResponse(BaseModel):
     taskId: str = Field(description="Use this id in every follow-up call.")

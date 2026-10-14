@@ -39,10 +39,12 @@ def _build_prompt(transcript: str, cfg: dict) -> str:
             "Base every field strictly on the transcript. Use the exact speaker labels shown.")
 
 
-def summarize(turns: list) -> dict:
+def summarize(turns: list, cfg: dict | None = None) -> dict:
+    """`cfg` (optional) overrides the ASR default summary config for this call."""
     if not turns:
         return {}
-    prompt = _build_prompt(transcript_text(turns), settings.summary_config())
+    cfg = cfg if cfg is not None else settings.summary_config()
+    prompt = _build_prompt(transcript_text(turns), cfg)
     return llm.chat_json(prompt, system=SYSTEM, model=settings.summary_model())
 
 

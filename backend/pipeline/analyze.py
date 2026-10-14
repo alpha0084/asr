@@ -32,7 +32,7 @@ _PROMPT = """Call transcript (the agent is {agent}, the customer is {customer}):
 {transcript}
 
 Score the AGENT on these checkpoints for the category "{category}":
-{items}
+{items}{guidance}
 
 Return JSON: {{"items": [
   {{"checkpoint": "<exact name>",
@@ -45,10 +45,18 @@ Rules: quote real evidence with its timestamp. If a checkpoint doesn't apply to 
 call, use verdict "N/A" and score 0. Be consistent and concise."""
 
 
-def _score_category(category: str, items: list, ctx: dict) -> list:
+def _score_category(category: str, checkpoints: list, ctx: dict) -> list:
+    names = [cp["name"] for cp in checkpoints]
+    with_guidance = [cp for cp in checkpoints if str(cp.get("guidance") or "").strip()]
+    guidance = ""
+    if with_guidance:
+        lines = "\n".join(f"- {cp['name']}: {str(cp['guidance']).strip()}" for cp in with_guidance)
+        guidance = ("\n\nCheckpoint guidance (what each one means \u2014 judge by this, "
+                    "do NOT change the checkpoint names):\n" + lines)
     prompt = _PROMPT.format(
         category=category,
-        items="\n".join(f"- {i}" for i in items),
+        items="\n".join(f"- {n}" for n in names),
+        guidance=guidance,
         transcript=ctx["transcript"],
         agent=ctx["agent"], customer=ctx["customer"],
     )
@@ -83,7 +91,8 @@ def _overall(rows: list, weights: dict) -> dict:
     }
 
 
-def analyze(turns: list, roles: dict | None = None, on_progress=None) -> dict:
+def analyze(turns: list, roles: dict | None = None, scorecard=None,
+            scorecard_version=None, on_progress=None) -> dict:
     if not turns:
         return {}
     roles = roles or {}
@@ -92,7 +101,7 @@ def analyze(turns: list, roles: dict | None = None, on_progress=None) -> dict:
         "agent": roles.get("agent", "the agent"),
         "customer": roles.get("customer", "the customer"),
     }
-    scorecard = settings.scorecard()
+    scorecard = scorecard if scorecard else settings.scorecard()
     rows, weights = [], {}
     for idx, cat in enumerate(scorecard, 1):
         category = cat["category"]
@@ -102,7 +111,7 @@ def analyze(turns: list, roles: dict | None = None, on_progress=None) -> dict:
             weights[(category, cp["name"])] = cat_w * float(cp.get("weight", 1.0) or 1.0)
         if on_progress:
             on_progress(idx, len(scorecard), category)
-        rows.extend(_score_category(category, [cp["name"] for cp in checkpoints], ctx))
+        rows.extend(_score_category(category, checkpoints, ctx))
 
     # Attach STABLE ids + a constrained verdict enum + met/applicable flags so the
     # webhook/DB carry keys that survive checkpoint renames, and rollups are exact.
@@ -116,5 +125,6 @@ def analyze(turns: list, roles: dict | None = None, on_progress=None) -> dict:
         r["category_id"] = cat_ids.get(r.get("category"))
         r["checkpoint_id"] = cp_ids.get((r.get("category"), r.get("checkpoint")))
 
-    return {"scorecard": rows, "scorecard_version": settings.scorecard_version(),
+    ver = scorecard_version if scorecard_version is not None else settings.scorecard_version()
+    return {"scorecard": rows, "scorecard_version": ver,
             **_overall(rows, weights)}
