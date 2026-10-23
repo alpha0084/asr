@@ -177,7 +177,8 @@ async function doLogout(){ try{await api("/logout",{method:"POST"})}catch(e){} M
 
 /* ---------- nav / layout ---------- */
 const NAV2=[
-  ["dashboard","Dashboard","📊"],["recordings","Recordings","🎙️"],["models","Models","🧠"],
+  ["dashboard","Dashboard","📊"],["containers","Containers","🐳"],["queue","Queue","🧵"],
+  ["capacity","Capacity","⏱️"],["recordings","Recordings","🎙️"],["models","Models","🧠"],
   ["scorecard","Scorecard","✅"],["summary","Summary","📝"],["webhooks","Webhooks","🔔"],
   ["keys","API Keys","🔑"],["admins","Admins","👥"]
 ];
@@ -192,7 +193,8 @@ function toggleNav(force){const s=el("side"),sc=el("scrim");const open=force===u
 function go(k){ cur=k; clearTimers(); toggleNav(false); el("detail").innerHTML="";
   document.querySelectorAll(".navitem").forEach(t=>t.classList.toggle("active",t.dataset.k===k));
   const t=NAV2.find(n=>n[0]===k); el("ptitle").textContent=t?t[1]:"";
-  ({dashboard:viewDashboard,recordings:viewRecordings,models:viewModels,scorecard:viewScorecard,
+  ({dashboard:viewDashboard,containers:viewContainers,queue:viewQueue,capacity:viewCapacity,
+    recordings:viewRecordings,models:viewModels,scorecard:viewScorecard,
     summary:viewSummary,webhooks:viewWebhooks,keys:viewKeys,admins:viewAdmins}[k])();
 }
 
@@ -248,7 +250,7 @@ async function refreshMetrics(){
   el("livepill").innerHTML=`<span class="dot-live"></span> live`;
   // GPU
   const g=(m.gpu&&m.gpu[0])||null;
-  if(g){ el("gpu_big").textContent=g.util+"%"; el("gpu_sub").textContent=`${esc(g.name)} · ${g.temp}°C`;
+  if(g){ el("gpu_big").textContent=g.util+"%"; el("gpu_sub").textContent=`${esc(g.name)} · ${g.temp}°C`+(g.power_w!=null?` · ${g.power_w}W`:"")+(g.clock_mhz!=null?` · ${g.clock_mhz}MHz`:"");
     el("gpu_chip").textContent=g.temp+"°C"; setBar("gpu",g.util);
     el("vram_big").textContent=(g.mem_used/1024).toFixed(1)+" GB"; el("vram_sub").textContent=`of ${(g.mem_total/1024).toFixed(0)} GB · ${g.mem_pct}%`;
     el("vram_chip").textContent=g.mem_pct+"%"; setBar("vram",g.mem_pct);
@@ -313,6 +315,115 @@ async function toggleAutoscale(){
     toast(`autoscale ${r.autoscale?"enabled":"disabled"}`);
   }catch(e){
     const d=_errDetail(e); msg.className="err"; msg.textContent="✗ "+d; el("conc_auto").checked=!on; toast(d,true);
+  }
+}
+
+/* ---------- containers: stack ops ---------- */
+async function viewContainers(){
+  el("view").innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h2 style="margin:0">Containers</h2><span id="dockmsg" class="muted" style="font-size:12px"></span>
+    </div>
+    <p class="muted" style="font-size:12px;margin:6px 0">The asr stack's containers. <b>Restart</b> recovers a wedged service; stopping <b>app</b> is blocked (it serves this panel).</p>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>Service</th><th>Status</th><th>Health</th><th>CPU</th><th>Memory</th><th>Restarts</th><th>Image</th><th></th>
+    </tr></thead><tbody id="ctbody"><tr><td colspan="8" class="muted">loading…</td></tr></tbody></table></div>
+  </div><div id="clogs"></div>`;
+  await loadContainers(); timers.push(setInterval(loadContainers,5000));
+}
+async function loadContainers(){
+  let d; try{ d=await api("/containers"); }catch(e){ return; }
+  el("dockmsg").innerHTML = d.docker_available ? "" : `<span class="err">Docker socket unreachable — check DOCKER_GID in .env</span>`;
+  const rows=d.containers||[];
+  el("ctbody").innerHTML = rows.length ? rows.map(c=>{
+    const cpu=c.cpu_pct!=null?c.cpu_pct+"%":"—";
+    const mem=c.mem_mb!=null?`${(c.mem_mb/1024).toFixed(2)} GB${c.mem_pct!=null?` · ${c.mem_pct}%`:""}`:"—";
+    const svc=esc(c.service||c.name);
+    return `<tr>
+      <td><b>${svc}</b></td>
+      <td>${badge(c.status==="running"?"running":c.status)}</td>
+      <td>${c.health?badge(c.health==="healthy"?"done":c.health):'<span class="muted">—</span>'}</td>
+      <td>${cpu}</td><td>${mem}</td><td>${c.restarts||0}</td>
+      <td class="muted" style="font-size:11px">${esc(c.image||"")}</td>
+      <td style="white-space:nowrap">
+        <button class="sm" onclick="ctAction('${svc}','restart')">Restart</button>
+        ${c.service!=="app"?`<button class="sm" onclick="ctAction('${svc}','stop')">Stop</button>`:""}
+        ${c.status!=="running"?`<button class="sm" onclick="ctAction('${svc}','start')">Start</button>`:""}
+        <button class="sm" onclick="ctLogs('${svc}')">Logs</button>
+      </td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="muted">no containers</td></tr>`;
+}
+async function ctAction(svc,act){
+  if((act==="stop"||act==="restart")&&!confirm(`${act} ${svc}?`)) return;
+  try{ await api(`/containers/${svc}/action`,{method:"POST",body:JSON.stringify({action:act})});
+    toast(`${act} ${svc}`); loadContainers();
+  }catch(e){ toast(_errDetail(e),true); }
+}
+async function ctLogs(svc){
+  el("clogs").innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="margin:0">${esc(svc)} · logs</h2><button class="sm" onclick="el('clogs').innerHTML=''">Close</button></div>
+    <pre id="clogpre" class="muted" style="max-height:360px;overflow:auto;font-size:11px;white-space:pre-wrap;margin:8px 0 0">loading…</pre></div>`;
+  try{ const d=await api(`/containers/${svc}/logs?tail=300`); el("clogpre").textContent=d.logs||"(empty)"; }
+  catch(e){ el("clogpre").textContent=_errDetail(e); }
+}
+
+/* ---------- queue: controls ---------- */
+async function viewQueue(){
+  el("view").innerHTML=`<div class="card">
+    <h2 style="margin:0 0 10px">Queue</h2>
+    <div class="grid">${gauge("q_queued","Queued","")}${gauge("q_running","Running","")}${gauge("q_done","Done","")}${gauge("q_error","Failed","")}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+      <button class="sm" onclick="requeueFailed()">Re-queue failed</button>
+      <button class="sm" onclick="clearFailed()">Delete failed</button>
+      <span id="qmsg" style="font-size:12px"></span>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:10px">Re-queue puts errored recordings back in line to retry. Delete removes them (rows + files). In-flight jobs always requeue safely on a restart.</p>
+  </div>`;
+  await loadQueue(); timers.push(setInterval(loadQueue,4000));
+}
+async function loadQueue(){
+  let m; try{ m=await api("/metrics"); }catch(e){ return; }
+  const w=m.workers||{}, set=(id,v)=>{ if(el(id+"_big")) el(id+"_big").textContent=v; };
+  set("q_queued",w.queued||0); set("q_running",w.running||0); set("q_done",w.done||0); set("q_error",w.error||0);
+}
+async function requeueFailed(){
+  if(!confirm("Re-queue all failed recordings?")) return;
+  try{ const r=await api("/queue/requeue-failed",{method:"POST"}); el("qmsg").className="ok"; el("qmsg").textContent=`✓ re-queued ${r.requeued}`; toast(`re-queued ${r.requeued}`); loadQueue(); }
+  catch(e){ toast(_errDetail(e),true); }
+}
+async function clearFailed(){
+  if(!confirm("Delete ALL failed recordings and their files? This cannot be undone.")) return;
+  try{ const r=await api("/queue/clear-failed",{method:"POST"}); el("qmsg").className="ok"; el("qmsg").textContent=`✓ deleted ${r.cleared}`; toast(`deleted ${r.cleared}`); loadQueue(); }
+  catch(e){ toast(_errDetail(e),true); }
+}
+
+/* ---------- capacity: per-stage timings ---------- */
+async function viewCapacity(){
+  el("view").innerHTML=`<div class="card">
+    <h2 style="margin:0 0 6px">Capacity — where transcription time goes</h2>
+    <p class="muted" style="font-size:12px;margin:0 0 12px">Average wall-seconds per pipeline stage over recent transcribe jobs (<span id="cap_n">—</span> samples). Transcription is usually a small slice; diarization/translate dominate.</p>
+    <div id="cap_bars" class="muted">loading…</div>
+    <div id="cap_est" class="card" style="margin-top:14px"></div>
+  </div>`;
+  await loadCapacity(); timers.push(setInterval(loadCapacity,15000));
+}
+async function loadCapacity(){
+  let d; try{ d=await api("/capacity/timings"); }catch(e){ return; }
+  el("cap_n").textContent=d.samples||0;
+  const avg=d.avg||{}, total=avg.total||0;
+  const stages=["preprocess","transcribe","diarize","orient","llm_relabel","translate"].filter(k=>avg[k]!=null);
+  if(!stages.length){ el("cap_bars").innerHTML=`<p class="muted">No timing samples yet — process a recording with the timing build deployed.</p>`; el("cap_est").innerHTML=""; return; }
+  el("cap_bars").innerHTML = stages.map(k=>{
+    const v=avg[k], pct=total?Math.round(100*v/total):0;
+    return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${k}</span><span><b>${v}s</b> · ${pct}%</span></div>
+      <div class="bar ${colorClass(pct)}"><i style="width:${Math.min(100,pct)}%"></i></div></div>`;
+  }).join("") + `<div style="display:flex;justify-content:space-between;font-size:13px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border,#444)"><span><b>total</b></span><span><b>${total}s</b> / job</span></div>`;
+  if(total>0){
+    let w={}; try{ w=(await api("/metrics")).workers||{}; }catch(_){}
+    const conc=w.concurrency||1, perMin=60/total*conc, night=Math.round(perMin*600), need=Math.ceil(6375*total/36000);
+    el("cap_est").innerHTML=`<b>Throughput estimate</b><br><span class="muted" style="font-size:12px">
+      at ${conc} worker(s): ~${perMin.toFixed(1)} jobs/min · ~${night.toLocaleString()} in a 10-hour overnight window.<br>
+      For 6,375/night you'd need ~<b>${need}</b> worker(s) (VRAM permitting).</span>`;
   }
 }
 
