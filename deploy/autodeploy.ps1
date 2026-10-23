@@ -50,11 +50,19 @@ try {
   docker compose up -d *>> $log
   if ($LASTEXITCODE -ne 0) { Log "docker up failed ($LASTEXITCODE) - ABORT"; exit 1 }
 
-  # health gate — up to 2 min for the app to answer /docs
+  # health gate — up to 2 min. Require /healthz cuda_ok=true, NOT just a 200: /docs stays 200 even
+  # when transcription has silently fallen back to CPU (the original outage), which must NOT be
+  # tagged known-good. A broken-CUDA deploy fails here and rolls back to the last GPU-healthy image.
   $ok = $false
   for ($i = 0; $i -lt 12; $i++) {
     Start-Sleep -Seconds 10
-    try { if ((Invoke-WebRequest -UseBasicParsing http://localhost:5530/docs -TimeoutSec 10).StatusCode -eq 200) { $ok = $true; break } } catch {}
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing http://localhost:5530/healthz -TimeoutSec 10
+      if ($r.StatusCode -eq 200) {
+        if (($r.Content | ConvertFrom-Json).cuda_ok) { $ok = $true; break }
+        Log "healthz up but cuda_ok=false - CPU-fallback guard, not marking healthy ($($r.Content))"
+      }
+    } catch {}
   }
   if ($ok) {
     docker tag asr-app:latest $good *>> $log          # this image is now the known-good rollback target

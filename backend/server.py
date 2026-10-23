@@ -122,6 +122,30 @@ def admin_page():
     return (FRONTEND / "admin.html").read_text()
 
 
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Readiness probe the auto-deployer gates on. Beyond "the app answers", it confirms the GPU
+    transcription path is actually usable — the original outage was a SILENT CPU fallback
+    (libcublas.so.12 not found) while /docs kept returning 200, so a /docs check alone would have
+    tagged that broken deploy as healthy. cuda_ok must be true for a deploy to count as good."""
+    h: dict = {"ok": True}
+    try:
+        import ctypes
+        ctypes.CDLL("libcublas.so.12")       # the exact lib that went missing; LD_LIBRARY_PATH must resolve it
+        h["cublas"] = True
+    except Exception as e:
+        h["cublas"] = False
+        h["cublas_error"] = str(e)
+    try:
+        import ctranslate2
+        h["ct2_cuda_devices"] = ctranslate2.get_cuda_device_count()
+    except Exception as e:
+        h["ct2_cuda_devices"] = 0
+        h["ct2_error"] = str(e)
+    h["cuda_ok"] = bool(h.get("cublas") and h.get("ct2_cuda_devices", 0) > 0)
+    return h
+
+
 def _require(tid: str) -> dict:
     job = jobs.get_job(tid)
     if not job:
