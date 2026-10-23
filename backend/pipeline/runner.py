@@ -70,16 +70,19 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             on_progress(detail)
 
     t0 = time.time()
+    timings: dict = {}  # per-stage wall seconds, for capacity profiling
 
     stage("Ingesting")
     audio_path = ingest.resolve_input(src)
 
     stage("Preprocessing")
+    _t = time.time()
     meta = preprocess.probe(audio_path)
     work_dir = DATA_DIR / (work_id or audio_path.stem)
     wav = preprocess.to_wav(audio_path, work_dir / "audio16k.wav",
                             clean=AUDIO_CLEANUP, filters=AUDIO_CLEANUP_FILTERS)
     waveform, sr = preprocess.load_waveform(wav)
+    timings["preprocess"] = round(time.time() - _t, 1)
 
     # No-speech gate: a blank / dead-air / voicemail recording has (almost) no speech, so a cheap
     # VAD pass skips the whole GPU pipeline for it instead of transcribing silence.
@@ -92,10 +95,12 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             return _no_speech_result(audio_path, meta, speech_sec, model, spk_mode, t0)
 
     stage("Transcribing")
+    _t = time.time()
     tr = transcribe.transcribe(
         waveform, sr, model_name=model, language=language,
         on_progress=lambda frac, cur, tot: progress(f"{fmt_ts(cur)} / {fmt_ts(tot)} ({int(frac*100)}%)"),
     )
+    timings["transcribe"] = round(time.time() - _t, 1)
 
     stage("Diarizing")
     turns = None
@@ -107,7 +112,9 @@ def transcribe_only(src, model=None, language=None, speakers=None,
     # wobble on garbled audio.
     if spk_mode == "llm":
         try:
+            _t = time.time()
             relabelled = refine_speakers.llm_relabel(tr["segments"])
+            timings["llm_relabel"] = round(time.time() - _t, 1)
             if relabelled:
                 display = {"agent": "Agent", "customer": "Customer"}
                 turns = [
@@ -127,7 +134,9 @@ def transcribe_only(src, model=None, language=None, speakers=None,
     # level overlap. "hybrid" then names the clusters Agent/Customer with ONE global
     # LLM decision — no per-line wobble.
     if turns is None:
+        _t = time.time()
         dia = diarize.diarize(waveform, sr, num_speakers=speakers)
+        timings["diarize"] = round(time.time() - _t, 1)
         stage("Assembling")
         segs = assemble.assign_speakers(tr["segments"], dia)
         raw_turns = assemble.build_turns(segs)
@@ -141,7 +150,9 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             for t in raw_turns:
                 by_speaker.setdefault(t["speaker"], []).append(t["text"])
             try:
+                _t = time.time()
                 mapping = refine_speakers.orient(by_speaker)   # {raw: Agent|Customer|Speaker N}
+                timings["orient"] = round(time.time() - _t, 1)
             except Exception as e:
                 log.warning("speaker orientation failed (%s) — using generic labels", e)
                 mapping = {}
@@ -163,6 +174,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
         target_language = None      # already in target language — skip
     if target_language:
         stage("Translating")
+        _t = time.time()
         try:
             turns = translate.translate_turns(
                 turns, target_language,
@@ -170,6 +182,10 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             )
         except Exception as e:
             target_language = f"{target_language} (failed: {type(e).__name__})"
+        timings["translate"] = round(time.time() - _t, 1)
+
+    timings["total"] = round(time.time() - t0, 1)
+    log.info("stage timings (s): %s", " ".join(f"{k}={v}" for k, v in timings.items()))
 
     result = {
         "input": str(audio_path),
@@ -198,6 +214,7 @@ def transcribe_only(src, model=None, language=None, speakers=None,
             "audio_cleanup_filters": AUDIO_CLEANUP_FILTERS if AUDIO_CLEANUP else None,
             "language": language or "auto",
             "target_language": target_language,
+            "stage_timings": timings,
         },
     }
     _save(work_dir, result)
