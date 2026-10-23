@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from . import admin_auth, db, jobs, metrics, public, settings, webhooks
+from . import admin_auth, db, dockerctl, jobs, metrics, public, settings, webhooks
 from .settings import K_MODELS, K_SCORECARD, K_SCORECARD_VERSION, K_SUMMARY, K_WEBHOOK
 
 
@@ -101,6 +101,40 @@ def delete_admin(uid: str, me: dict = Depends(admin_auth.require_admin)):
 @router.get("/metrics", dependencies=_ADMIN, summary="Live system metrics (GPU/RAM/models/traffic/workers)")
 def live_metrics():
     return metrics.snapshot()
+
+
+# ---------------------------------------------------------------- containers (ops)
+@router.get("/containers", dependencies=_ADMIN,
+            summary="asr-stack container stats (status/health/CPU/mem/restarts)")
+def list_containers():
+    return {"docker_available": dockerctl.available(), "containers": dockerctl.list_containers()}
+
+
+@router.get("/containers/{service}/logs", dependencies=_ADMIN, summary="Tail a container's logs")
+def container_logs(service: str, tail: int = 200):
+    try:
+        return {"service": service, "logs": dockerctl.logs(service, tail=min(max(tail, 1), 2000))}
+    except KeyError:
+        raise HTTPException(404, "no such container")
+    except Exception as e:
+        raise HTTPException(502, f"docker error: {e}")
+
+
+class ContainerActionBody(BaseModel):
+    action: str   # restart | stop | start
+
+
+@router.post("/containers/{service}/action", dependencies=_ADMIN,
+             summary="restart / stop / start an asr-stack container")
+def container_action(service: str, body: ContainerActionBody):
+    try:
+        return dockerctl.action(service, body.action)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "no such container")
+    except Exception as e:
+        raise HTTPException(502, f"docker error: {e}")
 
 
 # ---------------------------------------------------------------- worker concurrency
