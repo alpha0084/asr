@@ -137,6 +137,38 @@ def container_action(service: str, body: ContainerActionBody):
         raise HTTPException(502, f"docker error: {e}")
 
 
+# ---------------------------------------------------------------- queue (ops)
+@router.post("/queue/requeue-failed", dependencies=_ADMIN, summary="Re-queue all errored recordings")
+def requeue_failed():
+    return {"requeued": jobs.requeue_failed()}
+
+
+@router.post("/queue/clear-failed", dependencies=_ADMIN, summary="Delete all errored recordings (rows + files)")
+def clear_failed():
+    return {"cleared": jobs.clear_failed()}
+
+
+# ---------------------------------------------------------------- capacity profiling
+@router.get("/capacity/timings", dependencies=_ADMIN,
+            summary="Average per-stage wall timings over recent transcribe runs")
+def capacity_timings(limit: int = 200):
+    return db.stage_timing_stats(limit=min(max(limit, 1), 2000))
+
+
+# ---------------------------------------------------------------- autoscale ceiling
+class AutoscaleMaxBody(BaseModel):
+    autoscale_max: int
+
+
+@router.put("/settings/autoscale-max", dependencies=_ADMIN,
+            summary="Set the autoscale ceiling (max workers a burst may reach)")
+def put_autoscale_max(body: AutoscaleMaxBody):
+    n = int(body.autoscale_max)
+    if n < 1:
+        raise HTTPException(status_code=400, detail={"ok": False, "message": "autoscale_max must be at least 1"})
+    return {"autoscale_max": jobs.set_autoscale_max(n)}
+
+
 # ---------------------------------------------------------------- worker concurrency
 class ConcurrencyBody(BaseModel):
     concurrency: int

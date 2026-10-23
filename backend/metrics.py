@@ -43,23 +43,37 @@ def _traffic() -> dict:
     return {"rps": round(last_10 / 10.0, 2), "rpm": last_60, "last_5min": len(times)}
 
 
+def _num(x):
+    """Parse an nvidia-smi field to int, tolerating '[N/A]' / blanks → None."""
+    try:
+        return int(float(x))
+    except Exception:
+        return None
+
+
 def _gpu():
     if not shutil.which("nvidia-smi"):
         return None
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+            ["nvidia-smi",
+             "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,"
+             "power.draw,power.limit,clocks.sm,fan.speed",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5).stdout.strip()
         gpus = []
         for line in out.splitlines():
             p = [x.strip() for x in line.split(",")]
             if len(p) >= 5:
-                mu, mt = int(float(p[2])), int(float(p[3]))
-                gpus.append({"name": p[0], "util": int(float(p[1])),
+                mu, mt = _num(p[2]) or 0, _num(p[3]) or 0
+                gpus.append({"name": p[0], "util": _num(p[1]) or 0,
                              "mem_used": mu, "mem_total": mt,
                              "mem_pct": round(100 * mu / mt) if mt else 0,
-                             "temp": int(float(p[4]))})
+                             "temp": _num(p[4]),
+                             "power_w": _num(p[5]) if len(p) > 5 else None,
+                             "power_limit_w": _num(p[6]) if len(p) > 6 else None,
+                             "clock_mhz": _num(p[7]) if len(p) > 7 else None,
+                             "fan_pct": _num(p[8]) if len(p) > 8 else None})
         return gpus or None
     except Exception:
         return None
@@ -120,7 +134,7 @@ def headroom(gpu=None, ram=None) -> dict:
     ONCE and shared across workers, each extra worker's marginal cost is just its per-inference
     activation; we still hold a VRAM/RAM reserve free for the co-located production stack."""
     from .config import (WORKER_VRAM_MB, WORKER_RAM_GB, VRAM_RESERVE_MB,
-                         RAM_RESERVE_GB, MAX_WORKER_CONCURRENCY, AUTOSCALE_MAX)
+                         RAM_RESERVE_GB, MAX_WORKER_CONCURRENCY)
     cur = jobs.current_concurrency()
     gpu = gpu if gpu is not None else _gpu()
     ram = ram if ram is not None else _ram()
@@ -137,7 +151,7 @@ def headroom(gpu=None, ram=None) -> dict:
             "limited_by": limited_by, "vram_free_mb": vram_free, "ram_free_gb": ram_free,
             "per_worker_vram_mb": WORKER_VRAM_MB, "per_worker_ram_gb": WORKER_RAM_GB,
             "autoscale": jobs.autoscale_enabled(), "baseline": jobs.current_baseline(),
-            "autoscale_max": AUTOSCALE_MAX}
+            "autoscale_max": jobs.autoscale_max()}
 
 
 def snapshot() -> dict:

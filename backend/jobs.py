@@ -36,6 +36,7 @@ _live_count = 0
 _pool_lock = threading.Lock()
 _baseline: int | None = None
 _autoscale = False
+_autoscale_max: int | None = None    # live ceiling a burst may reach (falls back to config.AUTOSCALE_MAX)
 _autoscale_stop = threading.Event()
 
 
@@ -251,13 +252,48 @@ def set_autoscale(on: bool) -> bool:
     return _autoscale
 
 
+def autoscale_max() -> int:
+    """Live autoscale ceiling (admin-settable), falling back to the config default."""
+    from .config import AUTOSCALE_MAX
+    return _autoscale_max if _autoscale_max is not None else AUTOSCALE_MAX
+
+
+def set_autoscale_max(n: int) -> int:
+    """Admin action: set + persist the autoscale ceiling (max workers a burst may use)."""
+    global _autoscale_max
+    _autoscale_max = max(1, int(n))
+    try:
+        db.set_setting("autoscale_max", _autoscale_max)
+    except Exception as e:
+        print(f"[jobs] persist autoscale_max failed: {e}", flush=True)
+    print(f"[jobs] autoscale_max set to {_autoscale_max}", flush=True)
+    return _autoscale_max
+
+
+def requeue_failed() -> int:
+    """Admin action: put every errored recording back on the queue. Returns the count."""
+    n = db.requeue_failed()
+    _wake.set()
+    return n
+
+
+def clear_failed() -> int:
+    """Admin action: delete every errored recording (DB rows + files). Returns the count."""
+    ids = [j["id"] for j in list_jobs(limit=100000, status="error")]
+    for jid in ids:
+        try:
+            delete_job(jid)
+        except Exception as e:
+            print(f"[jobs] clear_failed: delete {jid} failed: {e}", flush=True)
+    return len(ids)
+
+
 def _autoscale_ceiling() -> int:
-    """Highest live worker count autoscaling may use right now: bounded by AUTOSCALE_MAX and the
+    """Highest live worker count autoscaling may use right now: bounded by autoscale_max() and the
     real-time VRAM/RAM headroom, so a burst never overcommits the shared GPU."""
     from . import metrics
-    from .config import AUTOSCALE_MAX
     hr = metrics.headroom()
-    return max(current_baseline(), min(AUTOSCALE_MAX, hr.get("max_safe", current_concurrency())))
+    return max(current_baseline(), min(autoscale_max(), hr.get("max_safe", current_concurrency())))
 
 
 def _autoscaler_loop():
@@ -298,7 +334,7 @@ def _autoscaler_loop():
 
 def start():
     """Idempotently launch the worker pool + autoscaler, sized from persisted settings."""
-    global _started, _baseline, _autoscale
+    global _started, _baseline, _autoscale, _autoscale_max
     with _start_lock:
         if _started:
             return
@@ -315,6 +351,12 @@ def start():
         _autoscale = AUTOSCALE_ENABLED_DEFAULT if a is None else bool(a)
     except Exception:
         _autoscale = AUTOSCALE_ENABLED_DEFAULT
+    try:
+        am = db.get_setting("autoscale_max")
+        if am is not None:
+            _autoscale_max = max(1, int(am))
+    except Exception:
+        pass
     _resize(_baseline)
     threading.Thread(target=_autoscaler_loop, name="asr-autoscaler", daemon=True).start()
     print(f"[jobs] worker pool started: {_baseline} workers "

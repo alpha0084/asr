@@ -286,6 +286,30 @@ def requeue_running():
         cur.execute("UPDATE recordings SET analytics_status='queued' WHERE analytics_status='running'")
 
 
+def requeue_failed() -> int:
+    """Admin action: put every errored recording back on the queue (clears the error). Returns count."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE recordings SET status='queued', stage=NULL, error=NULL WHERE status='error'")
+        return cur.rowcount
+
+
+def stage_timing_stats(limit: int = 200) -> dict:
+    """Average per-stage wall seconds over the most recent transcribe runs (capacity profiling).
+    Reads result->params->stage_timings written by the pipeline."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT result->'params'->'stage_timings' FROM runs "
+                    "WHERE run_type='transcribe' AND result->'params'->'stage_timings' IS NOT NULL "
+                    "ORDER BY created_at DESC LIMIT %s", (limit,))
+        rows = [r[0] for r in cur.fetchall() if r[0]]
+    agg: dict = {}
+    for t in rows:
+        for k, v in t.items():
+            if isinstance(v, (int, float)):
+                agg.setdefault(k, []).append(v)
+    avg = {k: round(sum(v) / len(v), 1) for k, v in agg.items()}
+    return {"samples": len(rows), "avg": avg}
+
+
 # ---------------------------------------------------------------- versioned runs (audit trail)
 def record_run(recording_id: str, run_type: str, params: dict | None, result: dict) -> str:
     """Store one execution of a stage as an immutable, versioned run + normalized rows.
