@@ -17,6 +17,10 @@ COPY requirements-server.txt ./
 RUN pip install --no-cache-dir -U pip setuptools wheel \
     && pip install --no-cache-dir -r requirements-server.txt 'psycopg[binary]'
 
+# Docker SDK for the admin panel's container stats/controls. Separate leaf layer so it never
+# invalidates the heavy torch/whisperx layer above — keeps code-change rebuilds fast.
+RUN pip install --no-cache-dir docker
+
 # App code
 COPY backend ./backend
 COPY frontend ./frontend
