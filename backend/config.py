@@ -20,6 +20,12 @@ DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 # mlx/cuda both fall back to CPU faster-whisper if their accelerator is unavailable.
 ASR_BACKEND = os.getenv("ASR_BACKEND", "mlx").strip()
 
+# faster-whisper model replicas, i.e. how many transcribe() calls run truly in parallel across
+# worker threads (they share one WhisperModel). Keep 1 on a single GPU: benchmarked on the RTX 5090
+# (8–16 calls, large-v3-turbo fp16) 2 replicas were ~45% SLOWER, and one replica already runs ~40x
+# realtime — transcription isn't the pipeline bottleneck.
+WHISPER_NUM_WORKERS = int(os.getenv("WHISPER_NUM_WORKERS", "1"))
+
 # pyannote uses torch and CAN use MPS; CPU is the reliable default. Override
 # with DIARIZE_DEVICE=mps to use Metal.
 DIARIZE_DEVICE = os.getenv("DIARIZE_DEVICE", "cpu").strip()

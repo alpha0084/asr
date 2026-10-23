@@ -29,8 +29,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
     && chown -R asr:asr /app
 
 USER asr
+# CTranslate2 (faster-whisper) dlopens libcublas.so.12 / libcudnn.so.9 by bare name; they ship
+# inside torch's nvidia-* wheels but aren't on the loader path, so without this every job
+# silently falls back to CPU transcription ("CUDA unavailable ... libcublas.so.12").
 ENV HF_HOME=/app/data/hf \
     XDG_CACHE_HOME=/app/data/cache \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib
 EXPOSE 5530
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -22,7 +22,7 @@ services:
       POSTGRES_DB: asr
       POSTGRES_HOST_AUTH_METHOD: trust   # loopback-only within the asr network
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     networks: [asr]
     restart: unless-stopped
     healthcheck:
@@ -57,6 +57,7 @@ services:
       DATABASE_URL: "host=postgres port=5432 dbname=asr user=asr_admin"
       OLLAMA_HOST: "ollama:11434"
       ASR_BACKEND: "cuda"
+      # (LD_LIBRARY_PATH for faster-whisper's CUDA libs is baked into the image — see Dockerfile)
     volumes:
       - appdata:/app/data             # DATA_DIR: HF/whisper cache + downloaded recordings
     ports:
@@ -68,10 +69,10 @@ services:
     # /docs regardless of worker load, so this never false-trips during a long transcription.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:5530/docs >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s              # give the app time to come up on first boot
+      interval: 60s                   # was 30s
+      timeout: 30s                    # was 10s — tolerate a slow /docs under heavy load
+      retries: 5                      # was 3
+      start_period: 180s              # was 120s — give the app time to come up on first boot
     labels:
       autoheal: "true"                # opt this container into the autoheal watcher below
 
@@ -98,7 +99,6 @@ services:
     depends_on: [app]
     networks: [asr]
     restart: unless-stopped
-    profiles: ["tunnel"]
 
 volumes:
   pgdata:      # transcriptions, runs, admins, api keys + per-key webhook config

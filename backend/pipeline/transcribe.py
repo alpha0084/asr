@@ -10,6 +10,7 @@ device; all three return {language, language_probability, segments:[{start,end,t
 import os
 
 from .. import settings
+from ..config import WHISPER_NUM_WORKERS
 
 _faster_cache = {}
 
@@ -96,7 +97,7 @@ def _get_faster(name: str, device: str):
         from faster_whisper import WhisperModel
         compute_type = (os.getenv("WHISPER_COMPUTE_TYPE", "").strip()
                         or ("float16" if device == "cuda" else "int8"))
-        kwargs = {"device": device, "compute_type": compute_type}
+        kwargs = {"device": device, "compute_type": compute_type, "num_workers": WHISPER_NUM_WORKERS}
         if device == "cpu":
             kwargs["cpu_threads"] = int(os.getenv("WHISPER_THREADS", "8"))
         _faster_cache[key] = WhisperModel(name, **kwargs)
