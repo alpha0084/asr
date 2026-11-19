@@ -93,9 +93,9 @@ _sm=None
 def seamless(wav, cid):
     global _sm
     if _sm is None:
-        from transformers import AutoProcessor, SeamlessM4TForSpeechToText
-        proc = AutoProcessor.from_pretrained("facebook/hf-seamless-m4t-medium")
-        mdl = SeamlessM4TForSpeechToText.from_pretrained("facebook/hf-seamless-m4t-medium").to(DEV)
+        from transformers import AutoProcessor, SeamlessM4Tv2ForSpeechToText
+        proc = AutoProcessor.from_pretrained("facebook/seamless-m4t-v2-large")
+        mdl = SeamlessM4Tv2ForSpeechToText.from_pretrained("facebook/seamless-m4t-v2-large").to(DEV)
         _sm = (proc, mdl)
     import soundfile as sf
     proc, mdl = _sm; en=[]
