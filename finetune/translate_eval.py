@@ -35,12 +35,16 @@ def chunks_30s(wav, cid):
 # ---------------- systems ----------------
 _wm=None
 def whisper_translate(wav, cid):
+    """transformers Whisper large-v3, task=translate -> English directly. Uses the torch
+    stack (GPU-aware), so no faster-whisper/CTranslate2 CUDA-lib juggling."""
     global _wm
-    from faster_whisper import WhisperModel
-    if _wm is None: _wm = WhisperModel("large-v3", device=DEV,
-                                       compute_type="float16" if DEV == "cuda" else "int8")
-    segs,_ = _wm.transcribe(str(wav), task="translate", beam_size=5, vad_filter=True)
-    return " ".join(s.text.strip() for s in segs).strip()
+    if _wm is None:
+        from transformers import pipeline
+        _wm = pipeline("automatic-speech-recognition", model="openai/whisper-large-v3",
+                       chunk_length_s=30, device=(0 if DEV == "cuda" else -1),
+                       torch_dtype=(torch.float16 if DEV == "cuda" else torch.float32))
+    r = _wm(str(wav), generate_kwargs={"task": "translate"})
+    return (r.get("text") or "").strip()
 
 _ic=None
 def _asr_ml(chunk):
