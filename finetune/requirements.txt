@@ -1,0 +1,13 @@
+# GPU fine-tune/eval deps. torch comes from the base image
+# (pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime) — it must be the cu128 build so the
+# RTX 5090 (Blackwell / sm_120) is supported. Do NOT pip-install torch here.
+transformers>=4.49
+datasets>=3.0
+accelerate>=1.0
+peft>=0.13
+evaluate>=0.4
+jiwer>=3.0
+sacrebleu>=2.4
+soundfile
+sentencepiece
+onnxruntime==1.19.2
