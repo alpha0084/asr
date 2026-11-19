@@ -53,23 +53,27 @@ def _asr_ml(chunk):
 
 _it=None
 def _mt_ml_en(text):
+    """Malayalam text -> English via NLLB-200, translated in ~25-word windows so each
+    input is sentence-sized (IndicConformer output is unpunctuated); no_repeat_ngram_size
+    guards against the long-blob repetition degeneration we saw earlier."""
     global _it
     if _it is None:
         import torch
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        from IndicTransToolkit.processor import IndicProcessor
-        tok = AutoTokenizer.from_pretrained("ai4bharat/indictrans2-indic-en-dist-200M", trust_remote_code=True)
-        mdl = AutoModelForSeq2SeqLM.from_pretrained("ai4bharat/indictrans2-indic-en-dist-200M", trust_remote_code=True)
-        _it = (tok, mdl, IndicProcessor(inference=True), torch)
-    tok, mdl, ip, torch = _it
-    # ~25-word windows so each MT input is sentence-sized (IndicConformer output is unpunctuated)
+        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+        tok = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
+        mdl = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
+        _it = (tok, mdl, tok.convert_tokens_to_ids("eng_Latn"), torch)
+    tok, mdl, EN, torch = _it
+    tok.src_lang = "mal_Mlym"
     w = text.split(); units = [" ".join(w[i:i+25]) for i in range(0, len(w), 25)] or [text]
-    batch = ip.preprocess_batch(units, src_lang="mal_Mlym", tgt_lang="eng_Latn")
-    inp = tok(batch, return_tensors="pt", padding=True, truncation=True, max_length=256)
-    with torch.no_grad():
-        out = mdl.generate(**inp, max_length=256, num_beams=5)
-    dec = tok.batch_decode(out, skip_special_tokens=True)
-    return " ".join(ip.postprocess_batch(dec, lang="eng_Latn"))
+    outs = []
+    for u in units:
+        inp = tok(u, return_tensors="pt", truncation=True, max_length=128)
+        with torch.no_grad():
+            o = mdl.generate(**inp, forced_bos_token_id=EN, max_length=160,
+                             num_beams=4, no_repeat_ngram_size=3)
+        outs.append(tok.batch_decode(o, skip_special_tokens=True)[0])
+    return " ".join(outs)
 
 def indicconformer_indictrans2(wav, cid):
     en=[]
@@ -97,16 +101,19 @@ def seamless(wav, cid):
     return " ".join(en).strip()
 
 SYSTEMS = {"whisper-translate": whisper_translate,
-           "indicconformer-indictrans2": indicconformer_indictrans2,
+           "indicconformer-nllb": indicconformer_indictrans2,
            "seamless": seamless}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--systems", default=",".join(SYSTEMS))
+    ap.add_argument("--ids", default="", help="comma-sep call ids to run (subset); blank = all")
     args = ap.parse_args()
     want = [s.strip() for s in args.systems.split(",") if s.strip() in SYSTEMS]
-    ds = [e for e in json.loads((DATA/"dataset.json").read_text()) if e.get("audio")]
+    only = {i.strip() for i in args.ids.split(",") if i.strip()}
+    ds = [e for e in json.loads((DATA/"dataset.json").read_text())
+          if e.get("audio") and (not only or e["id"] in only)]
     for name in want:
         fn = SYSTEMS[name]; outdir = OUT/name; outdir.mkdir(parents=True, exist_ok=True)
         hyps, refs, rows = [], [], []
@@ -114,8 +121,12 @@ def main():
         for e in ds:
             wav = WAV/f"{e['id']}.wav"; to_wav(e["audio"], wav)
             hp = outdir/f"{e['id']}.txt"
-            hyp = hp.read_text() if hp.exists() else fn(wav, e["id"])
-            if not hp.exists(): hp.write_text(hyp)
+            try:
+                hyp = hp.read_text() if hp.exists() else fn(wav, e["id"])
+                if not hp.exists(): hp.write_text(hyp)
+            except Exception as ex:
+                print(f"  {e['id']:12} ERROR: {type(ex).__name__}: {str(ex)[:120]}", flush=True)
+                continue
             ref = e["ref_en"]
             b = sacrebleu.sentence_bleu(hyp, [ref]).score
             c = sacrebleu.sentence_chrf(hyp, [ref]).score
@@ -123,6 +134,8 @@ def main():
                          "hyp_chars": len(hyp), "ref_chars": len(ref)})
             hyps.append(hyp); refs.append(ref)
             print(f"  {e['id']:12} BLEU={b:5.1f}  chrF={c:5.1f}  hyp_chars={len(hyp):5d}", flush=True)
+        if not hyps:
+            print(f"[{name}] no results", flush=True); continue
         cB = sacrebleu.corpus_bleu(hyps,[refs]).score
         cC = sacrebleu.corpus_chrf(hyps,[refs]).score
         print(f"[{name}] CORPUS  BLEU={cB:.1f}  chrF={cC:.1f}  ({len(hyps)} calls)", flush=True)
