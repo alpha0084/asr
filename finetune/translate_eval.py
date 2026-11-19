@@ -102,7 +102,7 @@ def seamless(wav, cid):
     for ch in chunks_30s(wav, cid):
         d,sr = sf.read(str(ch), dtype="float32")
         if d.ndim>1: d=d.mean(1)
-        inp = proc(audios=d, sampling_rate=16000, return_tensors="pt").to(DEV)
+        inp = proc(audio=d, sampling_rate=16000, return_tensors="pt").to(DEV)
         out = mdl.generate(**inp, tgt_lang="eng")[0].cpu().tolist()
         en.append(proc.decode(out, skip_special_tokens=True))
     return " ".join(en).strip()
