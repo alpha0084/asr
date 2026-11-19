@@ -39,15 +39,26 @@ def chunks_30s(wav, cid):
 # ---------------- systems ----------------
 _wm=None
 def whisper_translate(wav, cid):
-    """transformers Whisper large-v3, task=translate -> English directly. Uses the torch
-    stack (GPU-aware), so no faster-whisper/CTranslate2 CUDA-lib juggling."""
+    """transformers Whisper large-v3, task=translate -> English directly. Uses the
+    SEQUENTIAL long-form algorithm (no chunk_length_s; needs return_timestamps=True) with
+    temperature fallback + compression/logprob/no-speech thresholds and
+    condition_on_prev_tokens=False -- Whisper's native anti-hallucination. The chunked
+    pipeline loops catastrophically on these long calls ("I have been here for 19 years"
+    x30); the sequential algo suppresses those repetition hallucinations."""
     global _wm
     if _wm is None:
         from transformers import pipeline
         _wm = pipeline("automatic-speech-recognition", model="openai/whisper-large-v3",
-                       chunk_length_s=30, device=(0 if DEV == "cuda" else -1),
+                       device=(0 if DEV == "cuda" else -1),
                        torch_dtype=(torch.float16 if DEV == "cuda" else torch.float32))
-    r = _wm(str(wav), generate_kwargs={"task": "translate"})
+    r = _wm(str(wav), return_timestamps=True, generate_kwargs={
+        "task": "translate",
+        "condition_on_prev_tokens": False,
+        "compression_ratio_threshold": 1.35,
+        "logprob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+        "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+    })
     return (r.get("text") or "").strip()
 
 _ic=None
