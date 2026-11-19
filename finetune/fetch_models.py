@@ -15,9 +15,12 @@ Re-run on a stall — downloads resume where they left off; already-complete rep
 """
 import os, sys, time
 
+# The box's hf_xet (Xet transfer backend) is broken here — it throws
+# "process() takes no keyword arguments" on every Xet-backed repo (whisper/nllb/seamless).
+# Disable Xet so downloads fall back to classic HTTPS, which works.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 # Convert a hung connection into a fast, retriable error instead of a forever-0% stall.
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
-# hf_transfer (when present) can swallow the timeout and hang — keep the plain, timeout-honoring path.
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
 
 from huggingface_hub import snapshot_download

@@ -13,6 +13,10 @@ cut to 30s chunks (both new models + to avoid seq2seq repetition on long blobs).
 import argparse, json, os, subprocess, re
 from pathlib import Path
 
+# hf_xet is broken on the box ("process() takes no keyword arguments" on every Xet repo);
+# force classic HTTPS downloads. Must be set before any huggingface_hub/transformers import.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 ROOT = Path(__file__).resolve().parent
 DATA, OUT, WAV, CHUNKS = ROOT/"data", ROOT/"out", ROOT/"data"/"wav", ROOT/"data"/"chunks"
 for d in (OUT, WAV, CHUNKS): d.mkdir(parents=True, exist_ok=True)
