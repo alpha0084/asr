@@ -9,11 +9,13 @@ Output: finetune/data/dataset.json = [{id, group, audio, duration_s, ref_en, tur
 The English reference (`ref_en`) is the full translated text (speaker labels stripped);
 `turns` keeps CA/CX for speaker-role eval. Audio stays in place (paths are absolute).
 """
-import json, re, subprocess, zipfile
+import json, os, re, subprocess, zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SRC = Path("/Users/admin/Downloads")
+# Folder holding "Recordings and transcription/" + "Call Transcriptions/".
+# Override on the box: set ASR_FT_SRC to wherever you copied the data.
+SRC = Path(os.environ.get("ASR_FT_SRC", "/Users/admin/Downloads"))
 FLAT = SRC / "Recordings and transcription"
 FOLDERS = SRC / "Call Transcriptions"
 OUT = Path(__file__).resolve().parent / "data"

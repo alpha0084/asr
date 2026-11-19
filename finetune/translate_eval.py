@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parent
 DATA, OUT, WAV, CHUNKS = ROOT/"data", ROOT/"out", ROOT/"data"/"wav", ROOT/"data"/"chunks"
 for d in (OUT, WAV, CHUNKS): d.mkdir(parents=True, exist_ok=True)
 import sacrebleu
+import torch
+DEV = "cuda" if torch.cuda.is_available() else "cpu"   # use the box GPU when present, else CPU
 
 
 def to_wav(mpeg, wav):
@@ -35,7 +37,8 @@ _wm=None
 def whisper_translate(wav, cid):
     global _wm
     from faster_whisper import WhisperModel
-    if _wm is None: _wm = WhisperModel("large-v3", device="cpu", compute_type="int8")
+    if _wm is None: _wm = WhisperModel("large-v3", device=DEV,
+                                       compute_type="float16" if DEV == "cuda" else "int8")
     segs,_ = _wm.transcribe(str(wav), task="translate", beam_size=5, vad_filter=True)
     return " ".join(s.text.strip() for s in segs).strip()
 
@@ -61,14 +64,14 @@ def _mt_ml_en(text):
         import torch
         from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
         tok = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-        mdl = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
+        mdl = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M").to(DEV)
         _it = (tok, mdl, tok.convert_tokens_to_ids("eng_Latn"), torch)
     tok, mdl, EN, torch = _it
     tok.src_lang = "mal_Mlym"
     w = text.split(); units = [" ".join(w[i:i+25]) for i in range(0, len(w), 25)] or [text]
     outs = []
     for u in units:
-        inp = tok(u, return_tensors="pt", truncation=True, max_length=128)
+        inp = tok(u, return_tensors="pt", truncation=True, max_length=128).to(DEV)
         with torch.no_grad():
             o = mdl.generate(**inp, forced_bos_token_id=EN, max_length=160,
                              num_beams=4, no_repeat_ngram_size=3)
@@ -88,15 +91,15 @@ def seamless(wav, cid):
     if _sm is None:
         from transformers import AutoProcessor, SeamlessM4TForSpeechToText
         proc = AutoProcessor.from_pretrained("facebook/hf-seamless-m4t-medium")
-        mdl = SeamlessM4TForSpeechToText.from_pretrained("facebook/hf-seamless-m4t-medium")
+        mdl = SeamlessM4TForSpeechToText.from_pretrained("facebook/hf-seamless-m4t-medium").to(DEV)
         _sm = (proc, mdl)
     import soundfile as sf
     proc, mdl = _sm; en=[]
     for ch in chunks_30s(wav, cid):
         d,sr = sf.read(str(ch), dtype="float32")
         if d.ndim>1: d=d.mean(1)
-        inp = proc(audios=d, sampling_rate=16000, return_tensors="pt")
-        out = mdl.generate(**inp, tgt_lang="eng")[0].tolist()
+        inp = proc(audios=d, sampling_rate=16000, return_tensors="pt").to(DEV)
+        out = mdl.generate(**inp, tgt_lang="eng")[0].cpu().tolist()
         en.append(proc.decode(out, skip_special_tokens=True))
     return " ".join(en).strip()
 
