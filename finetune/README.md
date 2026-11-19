@@ -36,10 +36,21 @@ Manifest entries: `{id, audio, ref_en, turns, duration_s}`.
 
 ## 2. Eval — pick the best base model
 
+**First warm the model cache** (the box stalls on live HF downloads mid-eval; this
+step is resumable — re-run on a stall and it continues):
+
 ```bash
-python finetune/translate_eval.py --systems whisper-translate,indicconformer-nllb,seamless
+python finetune/fetch_models.py whisper nllb      # indic is usually already cached; add `seamless` if you want it
+```
+
+Then run the eval **offline** so it reads purely from the warmed cache and never stalls:
+
+```bash
+HF_HUB_OFFLINE=1 python finetune/translate_eval.py --systems whisper-translate,indicconformer-nllb
 ```
 Prints BLEU/chrF per system vs your English references; outputs under `finetune/out/`.
+(`seamless` is optional and the heaviest download (~9 GB); skip it unless the two
+above don't settle the choice.)
 
 ## 3. Fine‑tune — "pass the path and go"
 
