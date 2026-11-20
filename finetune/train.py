@@ -107,11 +107,16 @@ def main():
     # (Unpinned transformers drifts: newer releases drop/rename args like warmup_ratio or
     # evaluation_strategy -> eval_strategy. Filtering adapts instead of hard-crashing.)
     import inspect
+    # Prefer bf16 on CUDA: fp16 breaks eval generate() (float input vs half weights -> the
+    # "Input type (float) and bias type (Half)" crash); bf16 keeps params fp32 under autocast,
+    # and Blackwell (5090) supports it natively.
+    cuda = torch.cuda.is_available()
+    use_bf16 = cuda and torch.cuda.is_bf16_supported()
     ta = dict(
         output_dir=args.out, per_device_train_batch_size=args.batch,
         per_device_eval_batch_size=args.batch, gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr, num_train_epochs=args.epochs, warmup_ratio=0.1,
-        gradient_checkpointing=True, fp16=torch.cuda.is_available(),
+        gradient_checkpointing=True, fp16=(cuda and not use_bf16), bf16=use_bf16,
         eval_strategy="epoch", save_strategy="epoch", predict_with_generate=True,
         generation_max_length=225, logging_steps=10, report_to=[], load_best_model_at_end=True,
         metric_for_best_model="bleu", greater_is_better=True)
