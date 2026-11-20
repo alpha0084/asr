@@ -41,7 +41,7 @@ def main():
     ap.add_argument("--eval-frac", type=float, default=0.15)
     args = ap.parse_args()
 
-    import torch, evaluate
+    import torch, sacrebleu
     from datasets import Dataset
     from transformers import (WhisperProcessor, WhisperForConditionalGeneration,
                               Seq2SeqTrainer, Seq2SeqTrainingArguments)
@@ -89,13 +89,12 @@ def main():
             batch["labels"] = labels
             return batch
 
-    bleu = evaluate.load("sacrebleu")
     def metrics(p):
         pred = np.where(p.predictions != -100, p.predictions, proc.tokenizer.pad_token_id)
         lab = np.where(p.label_ids != -100, p.label_ids, proc.tokenizer.pad_token_id)
         hyp = proc.tokenizer.batch_decode(pred, skip_special_tokens=True)
         ref = proc.tokenizer.batch_decode(lab, skip_special_tokens=True)
-        return {"bleu": bleu.compute(predictions=hyp, references=[[r] for r in ref])["score"]}
+        return {"bleu": sacrebleu.corpus_bleu(hyp, [ref]).score}  # sacrebleu lib directly: no HF download, offline-safe
 
     targs = Seq2SeqTrainingArguments(
         output_dir=args.out, per_device_train_batch_size=args.batch,
