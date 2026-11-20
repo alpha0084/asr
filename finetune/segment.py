@@ -107,6 +107,8 @@ def main():
     ap.add_argument("--out", default="finetune/data/clips")
     ap.add_argument("--max-seconds", type=float, default=28.0)
     ap.add_argument("--min-words", type=int, default=4, help="drop windows with fewer ref words")
+    ap.add_argument("--max-words", type=int, default=90, help="hard cap on ref words per clip "
+                    "(keeps English under Whisper's 448-token decoder limit even if timing is off)")
     args = ap.parse_args()
 
     out = Path(args.out); (out / "wav").mkdir(parents=True, exist_ok=True)
@@ -119,6 +121,14 @@ def main():
         if not track or not ref_words:
             print(f"  {e['id']:12} skipped (no timing)"); continue
         times = assign_times(ref_words, track)
+        # Fallback: if alignment collapsed (few anchors -> times span <half the call), spread
+        # ref words uniformly across the call duration so windows cover the whole call instead
+        # of cramming most of the text into a couple of windows (the sreethu_2 "4 clips" case).
+        dur = e.get("duration_s") or 0
+        span = times[-1] - times[0]
+        if dur and span < 0.5 * dur:
+            print(f"  {e['id']:12} alignment weak (span {span:.0f}s / {dur:.0f}s) -> uniform spacing")
+            times = [dur * i / len(ref_words) for i in range(len(ref_words))]
 
         win_start_i, win_t0 = 0, times[0]
         made = 0
@@ -139,7 +149,7 @@ def main():
             made += 1
 
         for i in range(1, len(ref_words)):
-            if times[i] - win_t0 >= args.max_seconds:
+            if times[i] - win_t0 >= args.max_seconds or (i - win_start_i) >= args.max_words:
                 flush(i, times[i - 1])
                 win_start_i, win_t0 = i, times[i]
         flush(len(ref_words), times[-1])

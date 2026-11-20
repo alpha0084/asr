@@ -60,21 +60,28 @@ def main():
 
     raw = [e for e in json.loads(Path(args.data).read_text()) if e.get("audio") and e.get("ref_en")]
     cap = int(args.max_seconds * 16000)
-    longs = 0
+    max_lab = getattr(model.config, "max_target_positions", 448)  # Whisper decoder limit (448)
+    longs = toolong = 0
 
     def prep(e):
-        nonlocal longs
+        nonlocal longs, toolong
         a = decode_16k(e["audio"])
         if len(a) > cap:
             longs += 1; a = a[:cap]
         feat = proc.feature_extractor(a, sampling_rate=16000).input_features[0]
         labels = proc.tokenizer(e["ref_en"]).input_ids
+        if len(labels) > max_lab:            # Whisper can't decode past max_lab tokens -> truncate
+            toolong += 1; labels = labels[:max_lab]
         return {"input_features": feat, "labels": labels}
 
     ds = Dataset.from_list(raw).map(prep, remove_columns=Dataset.from_list(raw).column_names)
     if longs:
         warnings.warn(f"{longs}/{len(raw)} examples exceeded {args.max_seconds}s and were TRUNCATED. "
                       f"For real training, segment calls into <=30s clips with aligned English (see README).")
+    if toolong:
+        warnings.warn(f"{toolong}/{len(raw)} examples had >{max_lab}-token English and were TRUNCATED. "
+                      f"These are over-long/mis-segmented clips; re-run segment.py (hardened) to avoid. "
+                      f"Harmless for a smoke test, lossy for real training.")
     split = ds.train_test_split(test_size=args.eval_frac, seed=0)
 
     @dataclass
