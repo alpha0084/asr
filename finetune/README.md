@@ -52,10 +52,29 @@ Prints BLEU/chrF per system vs your English references; outputs under `finetune/
 (`seamless` is optional and the heaviest download (~9 GB); skip it unless the two
 above don't settle the choice.)
 
-## 3. Fine‑tune — "pass the path and go"
+## 2b. Segment calls into trainable clips
+
+`train.py` needs **≤30 s clips, each with the English for that clip** — but `build_dataset.py`
+produces **call-level** entries (minutes of audio, one call-level English). `segment.py`
+bridges them: it uses Whisper's word timestamps to cut each call into ≤30 s windows and
+aligns your *human* English reference onto those windows (English↔English), so each clip
+gets ground-truth text, not Whisper's noisy output.
 
 ```bash
-python finetune/train.py --data finetune/data/dataset.json --out finetune/model \
+python finetune/segment.py --data finetune/data/dataset.json --out finetune/data/clips
+# -> finetune/data/clips/dataset.json  (clip-level; feed THIS to train.py)
+```
+Approximate (timing from ASR + text alignment, not true forced alignment) but enough to
+make call-level data trainable. If you can capture data as short (per-turn / ≤30 s) audio +
+English directly (e.g. from the QC feedback loop), skip this step and feed those clips straight in.
+
+## 3. Fine‑tune — "pass the path and go"
+
+Base model is **Whisper large-v3** (it won the eval: chrF 50.6 vs IndicConformer 40.3 once
+long-form looping was fixed). Feed the **clip-level** dataset from step 2b:
+
+```bash
+python finetune/train.py --data finetune/data/clips/dataset.json --out finetune/model \
     --base openai/whisper-large-v3 --src-lang ml --epochs 5 --lora
 ```
 Then re‑run step 2 pointing at `finetune/model` to measure the gain.
