@@ -96,7 +96,11 @@ def main():
         ref = proc.tokenizer.batch_decode(lab, skip_special_tokens=True)
         return {"bleu": sacrebleu.corpus_bleu(hyp, [ref]).score}  # sacrebleu lib directly: no HF download, offline-safe
 
-    targs = Seq2SeqTrainingArguments(
+    # Build the full arg set, then keep only kwargs this transformers version accepts.
+    # (Unpinned transformers drifts: newer releases drop/rename args like warmup_ratio or
+    # evaluation_strategy -> eval_strategy. Filtering adapts instead of hard-crashing.)
+    import inspect
+    ta = dict(
         output_dir=args.out, per_device_train_batch_size=args.batch,
         per_device_eval_batch_size=args.batch, gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr, num_train_epochs=args.epochs, warmup_ratio=0.1,
@@ -104,6 +108,19 @@ def main():
         eval_strategy="epoch", save_strategy="epoch", predict_with_generate=True,
         generation_max_length=225, logging_steps=10, report_to=[], load_best_model_at_end=True,
         metric_for_best_model="bleu", greater_is_better=True)
+    params = set(inspect.signature(Seq2SeqTrainingArguments.__init__).parameters)
+    if "eval_strategy" not in params and "evaluation_strategy" in params:
+        ta["evaluation_strategy"] = ta.pop("eval_strategy")
+    # load_best_model_at_end requires a working eval strategy + matching save strategy; if
+    # the eval-strategy key didn't survive, drop best-model-loading so construction stays valid.
+    if not (params & {"eval_strategy", "evaluation_strategy"}):
+        for k in ("load_best_model_at_end", "metric_for_best_model", "greater_is_better"):
+            ta.pop(k, None)
+    dropped = sorted(k for k in ta if k not in params)
+    if dropped:
+        warnings.warn(f"transformers {__import__('transformers').__version__}: dropping unsupported "
+                      f"TrainingArguments kwargs {dropped}")
+    targs = Seq2SeqTrainingArguments(**{k: v for k, v in ta.items() if k in params})
 
     trainer = Seq2SeqTrainer(model=model, args=targs, train_dataset=split["train"],
                              eval_dataset=split["test"], data_collator=Collator(),
