@@ -48,7 +48,10 @@ def main():
     from dataclasses import dataclass
 
     proc = WhisperProcessor.from_pretrained(args.base, language=args.src_lang, task="translate")
-    model = WhisperForConditionalGeneration.from_pretrained(args.base)
+    # Force fp32 weights: transformers 5.x loads in the checkpoint's stored dtype (whisper-
+    # large-v3 ships fp16), which crashes eval generate() (fp32 audio vs fp16 conv weights).
+    # fp32 master weights + bf16 autocast (below) is the correct fast+stable setup.
+    model = WhisperForConditionalGeneration.from_pretrained(args.base, dtype=torch.float32)
     model.generation_config.language = args.src_lang
     model.generation_config.task = "translate"
     model.generation_config.forced_decoder_ids = None
